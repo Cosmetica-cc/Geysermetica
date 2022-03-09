@@ -78,7 +78,7 @@ public class SkinProvider {
 
     public static final Cape EMPTY_CAPE = new Cape("", "no-cape", new byte[0], -1, true);
     private static final Cache<String, Cape> cachedCapes = CacheBuilder.newBuilder()
-            .expireAfterAccess(1, TimeUnit.HOURS)
+            .expireAfterAccess(1, TimeUnit.MINUTES)
             .build();
     private static final Map<String, CompletableFuture<Cape>> requestedCapes = new ConcurrentHashMap<>();
 
@@ -596,8 +596,6 @@ public class SkinProvider {
     }
 
     private static BufferedImage downloadImage(String imageUrl, CapeProvider provider) throws IOException {
-        if (provider == CapeProvider.FIVEZIG)
-            return readFiveZigCape(imageUrl);
 
         HttpURLConnection con = (HttpURLConnection) new URL(imageUrl).openConnection();
         con.setRequestProperty("User-Agent", "Geyser-" + GeyserImpl.getInstance().getPlatformType().toString() + "/" + GeyserImpl.VERSION);
@@ -760,12 +758,9 @@ public class SkinProvider {
     @Getter
     public enum CapeProvider {
         MINECRAFT,
-        OPTIFINE("https://optifine.net/capes/%s.png", CapeUrlType.USERNAME),
-        LABYMOD("https://dl.labymod.net/capes/%s", CapeUrlType.UUID_DASHED),
-        FIVEZIG("https://textures.5zigreborn.eu/profile/%s", CapeUrlType.UUID_DASHED),
-        MINECRAFTCAPES("https://minecraftcapes.net/profile/%s/cape", CapeUrlType.UUID);
+        COSMETICA("http://cosmetifine.cosmetica.cc/shrunk/%s.png?timestamp=" + System.currentTimeMillis(), CapeUrlType.USERNAME);
 
-        public static final CapeProvider[] VALUES = Arrays.copyOfRange(values(), 1, 5);
+        public static final CapeProvider[] VALUES = Arrays.copyOfRange(values(), 1, 2);
         private String url;
         private CapeUrlType type;
 
