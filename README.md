@@ -15,7 +15,8 @@ Geyser is an open collaboration project by [CubeCraft Games](https://cubecraft.n
 Geyser is a proxy, bridging the gap between Minecraft: Bedrock Edition and Minecraft: Java Edition servers.
 The ultimate goal of this project is to allow Minecraft: Bedrock Edition users to join Minecraft: Java Edition servers as seamlessly as possible. However, due to the nature of Geyser translating packets over the network of two different games, *do not expect everything to work perfectly!*
 
-Special thanks to the DragonProxy project for being a trailblazer in protocol translation and for all the team members who have joined us here!
+## What is Geysermetica?
+Geyser, but we removed all the other third-party cape servers and replaced them with [Cosmetica](https://cosmetica.cc)!
 
 ### Currently supporting Minecraft Bedrock 1.17.41 + 1.18.0 - 1.18.10 and Minecraft Java 1.18.2.
 
@@ -23,14 +24,6 @@ Special thanks to the DragonProxy project for being a trailblazer in protocol tr
 Take a look [here](https://github.com/GeyserMC/Geyser/wiki/Setup) for how to set up Geyser.
 
 [![YouTube Video](https://img.youtube.com/vi/U7dZZ8w7Gi4/0.jpg)](https://www.youtube.com/watch?v=U7dZZ8w7Gi4)
-
-## Links:
-- Website: https://geysermc.org
-- Docs: https://github.com/GeyserMC/Geyser/wiki
-- Download: https://ci.geysermc.org
-- Discord: https://discord.gg/geysermc
-- Donate: https://opencollective.com/geysermc
-- Test Server: `test.geysermc.org` port `25565` for Java and `19132` for Bedrock
 
 ## What's Left to be Added/Fixed
 - Near-perfect movement (to the point where anticheat on large servers is unlikely to ban you)
