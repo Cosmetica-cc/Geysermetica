@@ -30,14 +30,20 @@ import java.net.URISyntaxException;
 
 public final class Constants {
     public static final URI GLOBAL_API_WS_URI;
-    public static final String NTP_SERVER = "time.cloudflare.com";
 
     public static final String NEWS_OVERVIEW_URL = "https://api.geysermc.org/v2/news/";
     public static final String NEWS_PROJECT_NAME = "geyser";
 
-    public static final String FLOODGATE_DOWNLOAD_LOCATION = "https://ci.opencollab.dev/job/GeyserMC/job/Floodgate/job/master/";
+    public static final String FLOODGATE_DOWNLOAD_LOCATION = "https://geysermc.org/download#floodgate";
+
+    public static final String GEYSER_DOWNLOAD_LOCATION = "https://geysermc.org/download";
+    public static final String UPDATE_PERMISSION = "geyser.update";
 
     static final String SAVED_REFRESH_TOKEN_FILE = "saved-refresh-tokens.json";
+
+    public static final String GEYSER_CUSTOM_NAMESPACE = "geyser_custom";
+
+    public static final String MINECRAFT_SKIN_SERVER_URL = "https://textures.minecraft.net/texture/";
 
     static {
         URI wsUri = null;

@@ -25,13 +25,14 @@
 
 package org.geysermc.geyser.platform.spigot;
 
-import com.github.steveice10.mc.protocol.MinecraftProtocol;
+import org.geysermc.mcprotocollib.protocol.MinecraftProtocol;
 import com.viaversion.viaversion.bukkit.handlers.BukkitChannelInitializer;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.channel.*;
 import io.netty.channel.local.LocalAddress;
 import io.netty.util.concurrent.DefaultThreadFactory;
 import org.bukkit.Bukkit;
+import org.checkerframework.checker.nullness.qual.NonNull;
 import org.geysermc.geyser.GeyserBootstrap;
 import org.geysermc.geyser.network.netty.GeyserInjector;
 import org.geysermc.geyser.network.netty.LocalServerChannelWrapper;
@@ -74,12 +75,10 @@ public class GeyserSpigotInjector extends GeyserInjector {
         Object connection = null;
         // Find the class that manages network IO
         for (Method m : serverClazz.getDeclaredMethods()) {
-            if (m.getReturnType() != null) {
-                // First is Spigot-mapped name, second is Mojang-mapped name which is implemented as future-proofing
-                if (m.getReturnType().getSimpleName().equals("ServerConnection") || m.getReturnType().getSimpleName().equals("ServerConnectionListener")) {
-                    if (m.getParameterTypes().length == 0) {
-                        connection = m.invoke(server);
-                    }
+            // First is Spigot-mapped name, second is Mojang-mapped name which is implemented as future-proofing
+            if (m.getReturnType().getSimpleName().equals("ServerConnection") || m.getReturnType().getSimpleName().equals("ServerConnectionListener")) {
+                if (m.getParameterTypes().length == 0) {
+                    connection = m.invoke(server);
                 }
             }
         }
@@ -115,10 +114,17 @@ public class GeyserSpigotInjector extends GeyserInjector {
 
         ChannelFuture channelFuture = (new ServerBootstrap()
                 .channel(LocalServerChannelWrapper.class)
-                .childHandler(new ChannelInitializer<Channel>() {
+                .childHandler(new ChannelInitializer<>() {
                     @Override
-                    protected void initChannel(Channel ch) throws Exception {
+                    protected void initChannel(@NonNull Channel ch) throws Exception {
                         initChannel.invoke(childHandler, ch);
+
+                        int index = ch.pipeline().names().indexOf("encoder");
+                        String baseName = index != -1 ? "encoder" : "outbound_config";
+
+                        if (bootstrap.getGeyserConfig().isDisableCompression() && GeyserSpigotCompressionDisabler.ENABLED) {
+                            ch.pipeline().addAfter(baseName, "geyser-compression-disabler", new GeyserSpigotCompressionDisabler());
+                        }
                     }
                 })
                 // Set to MAX_PRIORITY as MultithreadEventLoopGroup#newDefaultThreadFactory which DefaultEventLoopGroup implements does by default
@@ -147,7 +153,7 @@ public class GeyserSpigotInjector extends GeyserInjector {
                 childHandler = (ChannelInitializer<Channel>) childHandlerField.get(handler);
                 // ViaVersion non-Paper-injector workaround so we aren't double-injecting
                 if (isViaVersion && childHandler instanceof BukkitChannelInitializer) {
-                    childHandler = ((BukkitChannelInitializer) childHandler).getOriginal();
+                    childHandler = ((BukkitChannelInitializer) childHandler).original();
                 }
                 break;
             } catch (Exception e) {
@@ -169,10 +175,12 @@ public class GeyserSpigotInjector extends GeyserInjector {
      * For the future, if someone wants to properly fix this - as of December 28, 2021, it happens on 1.16.5/1.17.1/1.18.1 EXCEPT Spigot 1.16.5
      */
     private void workAroundWeirdBug(GeyserBootstrap bootstrap) {
-        LocalSession session = new LocalSession(bootstrap.getGeyserConfig().getRemote().getAddress(),
-                bootstrap.getGeyserConfig().getRemote().getPort(), this.serverSocketAddress,
-                InetAddress.getLoopbackAddress().getHostAddress(), new MinecraftProtocol());
+        MinecraftProtocol protocol = new MinecraftProtocol();
+        LocalSession session = new LocalSession(bootstrap.getGeyserConfig().getRemote().address(),
+                bootstrap.getGeyserConfig().getRemote().port(), this.serverSocketAddress,
+                InetAddress.getLoopbackAddress().getHostAddress(), protocol, protocol.createHelper());
         session.connect();
+        session.disconnect("");
     }
 
     @Override

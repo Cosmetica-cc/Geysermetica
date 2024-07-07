@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2019-2022 GeyserMC. http://geysermc.org
+ * Copyright (c) 2019-2024 GeyserMC. http://geysermc.org
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -25,14 +25,13 @@
 
 package org.geysermc.geyser.translator.protocol.bedrock;
 
-import com.github.steveice10.mc.protocol.data.game.entity.player.GameMode;
-import com.nukkitx.protocol.bedrock.packet.EntityPickRequestPacket;
+import org.cloudburstmc.protocol.bedrock.packet.EntityPickRequestPacket;
 import org.geysermc.geyser.entity.type.BoatEntity;
 import org.geysermc.geyser.entity.type.Entity;
+import org.geysermc.geyser.registry.type.ItemMapping;
 import org.geysermc.geyser.session.GeyserSession;
 import org.geysermc.geyser.translator.protocol.PacketTranslator;
 import org.geysermc.geyser.translator.protocol.Translator;
-import org.geysermc.geyser.registry.type.ItemMapping;
 import org.geysermc.geyser.util.InventoryUtils;
 
 import java.util.Locale;
@@ -45,14 +44,17 @@ public class BedrockEntityPickRequestTranslator extends PacketTranslator<EntityP
 
     @Override
     public void translate(GeyserSession session, EntityPickRequestPacket packet) {
-        if (session.getGameMode() != GameMode.CREATIVE) return; // Apparently Java behavior
+        if (!session.isInstabuild()) {
+            // As of Java Edition 1.19.3
+            return;
+        }
         Entity entity = session.getEntityCache().getEntityByGeyserId(packet.getRuntimeEntityId());
         if (entity == null) return;
 
         // Get the corresponding item
         String itemName;
         switch (entity.getDefinition().entityType()) {
-            case BOAT -> {
+            case BOAT, CHEST_BOAT -> {
                 // Include type of boat in the name
                 int variant = ((BoatEntity) entity).getVariant();
                 String typeOfBoat = switch (variant) {
@@ -60,10 +62,17 @@ public class BedrockEntityPickRequestTranslator extends PacketTranslator<EntityP
                     case 2 -> "birch";
                     case 3 -> "jungle";
                     case 4 -> "acacia";
-                    case 5 -> "dark_oak";
+                    case 5 -> "cherry";
+                    case 6 -> "dark_oak";
+                    case 7 -> "mangrove";
+                    case 8 -> "bamboo";
                     default -> "oak";
                 };
-                itemName = typeOfBoat + "_boat";
+                itemName = typeOfBoat + "_" + entity.getDefinition().entityType().name().toLowerCase(Locale.ROOT);
+                // Bamboo boat is a raft
+                if (variant == 8) {
+                    itemName = itemName.replace("boat", "raft");
+                }
             }
             case LEASH_KNOT -> itemName = "lead";
             case CHEST_MINECART, COMMAND_BLOCK_MINECART, FURNACE_MINECART, HOPPER_MINECART, TNT_MINECART ->

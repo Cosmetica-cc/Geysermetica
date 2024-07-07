@@ -26,10 +26,10 @@
 package org.geysermc.geyser.translator.inventory.horse;
 
 import org.geysermc.geyser.inventory.Inventory;
-import org.geysermc.geyser.session.GeyserSession;
-import org.geysermc.geyser.translator.inventory.BaseInventoryTranslator;
 import org.geysermc.geyser.inventory.updater.HorseInventoryUpdater;
 import org.geysermc.geyser.inventory.updater.InventoryUpdater;
+import org.geysermc.geyser.session.GeyserSession;
+import org.geysermc.geyser.translator.inventory.BaseInventoryTranslator;
 
 public abstract class AbstractHorseInventoryTranslator extends BaseInventoryTranslator {
     private final InventoryUpdater updater;
@@ -40,7 +40,8 @@ public abstract class AbstractHorseInventoryTranslator extends BaseInventoryTran
     }
 
     @Override
-    public void prepareInventory(GeyserSession session, Inventory inventory) {
+    public boolean prepareInventory(GeyserSession session, Inventory inventory) {
+        return true;
     }
 
     @Override

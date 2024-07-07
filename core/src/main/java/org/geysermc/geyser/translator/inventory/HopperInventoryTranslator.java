@@ -25,23 +25,24 @@
 
 package org.geysermc.geyser.translator.inventory;
 
-import com.nukkitx.protocol.bedrock.data.inventory.ContainerSlotType;
-import com.nukkitx.protocol.bedrock.data.inventory.ContainerType;
+import org.cloudburstmc.protocol.bedrock.data.inventory.ContainerSlotType;
+import org.cloudburstmc.protocol.bedrock.data.inventory.ContainerType;
 import org.geysermc.geyser.inventory.BedrockContainerSlot;
 import org.geysermc.geyser.inventory.updater.ContainerInventoryUpdater;
+import org.geysermc.geyser.level.block.Blocks;
 
 /**
  * Implemented on top of any block that does not have special properties implemented
  */
 public class HopperInventoryTranslator extends AbstractBlockInventoryTranslator {
     public HopperInventoryTranslator() {
-        super(5, "minecraft:hopper[enabled=false,facing=down]", ContainerType.HOPPER, ContainerInventoryUpdater.INSTANCE);
+        super(5, Blocks.HOPPER, ContainerType.HOPPER, ContainerInventoryUpdater.INSTANCE);
     }
 
     @Override
     public BedrockContainerSlot javaSlotToBedrockContainer(int javaSlot) {
         if (javaSlot < this.size) {
-            return new BedrockContainerSlot(ContainerSlotType.CONTAINER, javaSlot);
+            return new BedrockContainerSlot(ContainerSlotType.LEVEL_ENTITY, javaSlot);
         }
         return super.javaSlotToBedrockContainer(javaSlot);
     }

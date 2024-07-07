@@ -25,62 +25,116 @@
 
 package org.geysermc.geyser.registry.type;
 
-import com.nukkitx.nbt.NbtList;
-import com.nukkitx.nbt.NbtMap;
-import it.unimi.dsi.fastutil.ints.IntSet;
-import it.unimi.dsi.fastutil.objects.Object2IntMap;
+import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
+import it.unimi.dsi.fastutil.objects.Object2ObjectMap;
 import lombok.Builder;
 import lombok.Value;
+import org.checkerframework.checker.nullness.qual.Nullable;
+import org.cloudburstmc.nbt.NbtMap;
+import org.cloudburstmc.protocol.bedrock.data.BlockPropertyData;
+import org.cloudburstmc.protocol.bedrock.data.definitions.BlockDefinition;
+import org.cloudburstmc.protocol.common.DefinitionRegistry;
+import org.geysermc.geyser.api.block.custom.CustomBlockState;
+import org.geysermc.geyser.level.block.type.Block;
+import org.geysermc.geyser.level.block.type.BlockState;
 
+import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 @Builder
 @Value
-public class BlockMappings {
-    int bedrockAirId;
-    int bedrockWaterId;
-    int bedrockMovingBlockId;
+public class BlockMappings implements DefinitionRegistry<BlockDefinition> {
+    GeyserBedrockBlock bedrockAir;
+    BlockDefinition bedrockWater;
+    BlockDefinition bedrockMovingBlock;
 
-    int blockStateVersion;
-
-    int[] javaToBedrockBlocks;
-
-    NbtList<NbtMap> bedrockBlockStates;
+    GeyserBedrockBlock[] javaToBedrockBlocks;
+    GeyserBedrockBlock[] javaToVanillaBedrockBlocks;
 
     /**
-     * Contains a map of Java blocks to their respective Bedrock block tag, if the Java identifier is different from Bedrock.
-     * Required to fix villager trades with these blocks.
+     * Java block ID -> Bedrock block ID (without minecraft:), IF they are different
+     * While Bedrock is progressing slowly through their flattening, some Bedrock identifiers may differ.
      */
-    Map<String, NbtMap> javaIdentifierToBedrockTag;
+    Int2ObjectMap<String> javaToBedrockIdentifiers;
 
-    int commandBlockRuntimeId;
+    Map<NbtMap, GeyserBedrockBlock> stateDefinitionMap;
+    GeyserBedrockBlock[] bedrockRuntimeMap;
+    int[] remappedVanillaIds;
 
-    Object2IntMap<NbtMap> itemFrames;
-    Map<String, NbtMap> flowerPotBlocks;
+    BlockDefinition commandBlock;
+    BlockDefinition mobSpawnerBlock;
 
-    IntSet jigsawStateIds;
+    Map<NbtMap, BlockDefinition> itemFrames;
+    Map<Block, NbtMap> flowerPotBlocks;
 
-    public int getBedrockBlockId(int state) {
-        if (state >= this.javaToBedrockBlocks.length) {
-            return bedrockAirId;
+    Set<BlockDefinition> jigsawStates;
+    Map<String, BlockDefinition> structureBlockStates;
+
+    List<BlockPropertyData> blockProperties;
+    Object2ObjectMap<CustomBlockState, GeyserBedrockBlock> customBlockStateDefinitions;
+    Int2ObjectMap<GeyserBedrockBlock> extendedCollisionBoxes;
+
+    public int getBedrockBlockId(int javaState) {
+        return getBedrockBlock(javaState).getRuntimeId();
+    }
+
+    public GeyserBedrockBlock getBedrockBlock(int javaState) {
+        if (javaState < 0 || javaState >= this.javaToBedrockBlocks.length) {
+            return bedrockAir;
         }
-        return this.javaToBedrockBlocks[state];
+        return this.javaToBedrockBlocks[javaState];
     }
 
-    public int getItemFrame(NbtMap tag) {
-        return this.itemFrames.getOrDefault(tag, -1);
+    public GeyserBedrockBlock getBedrockBlock(BlockState javaState) {
+        return this.getBedrockBlock(javaState.javaId());
     }
 
-    public boolean isItemFrame(int bedrockBlockRuntimeId) {
-        return this.itemFrames.values().contains(bedrockBlockRuntimeId);
+    public GeyserBedrockBlock getVanillaBedrockBlock(BlockState javaState) {
+        return getVanillaBedrockBlock(javaState.javaId());
     }
 
-    /**
-     * @param cleanJavaIdentifier the clean Java identifier of the block to look up
-     *
-     * @return the block tag of the block name mapped from Java to Bedrock.
-     */
-    public NbtMap getBedrockBlockNbt(String cleanJavaIdentifier) {
-        return this.javaIdentifierToBedrockTag.get(cleanJavaIdentifier);
+    public GeyserBedrockBlock getVanillaBedrockBlock(int javaState) {
+        if (javaState < 0 || javaState >= this.javaToVanillaBedrockBlocks.length) {
+            return bedrockAir;
+        }
+        return this.javaToVanillaBedrockBlocks[javaState];
+    }
+
+    public BlockDefinition getItemFrame(NbtMap tag) {
+        return this.itemFrames.get(tag);
+    }
+
+    public boolean isItemFrame(BlockDefinition definition) {
+        if (definition instanceof GeyserBedrockBlock def) {
+            return this.itemFrames.containsKey(def.getState());
+        }
+
+        return false;
+    }
+
+    public BlockDefinition getStructureBlockFromMode(String mode) {
+        return structureBlockStates.get(mode);
+    }
+
+    @Override
+    public @Nullable GeyserBedrockBlock getDefinition(int bedrockId) {
+        if (bedrockId < 0 || bedrockId >= this.bedrockRuntimeMap.length) {
+            return null;
+        }
+        return bedrockRuntimeMap[bedrockId];
+    }
+
+    public @Nullable GeyserBedrockBlock getDefinition(NbtMap tag) {
+        if (tag == null) {
+            return null;
+        }
+
+        return this.stateDefinitionMap.get(tag);
+    }
+
+    @Override
+    public boolean isRegistered(BlockDefinition bedrockBlock) {
+        return getDefinition(bedrockBlock.getRuntimeId()) == bedrockBlock;
     }
 }

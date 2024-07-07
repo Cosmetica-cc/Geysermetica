@@ -25,27 +25,26 @@
 
 package org.geysermc.geyser.inventory;
 
-import com.github.steveice10.mc.protocol.data.game.inventory.ContainerType;
-import com.github.steveice10.opennbt.tag.builtin.ByteTag;
-import com.github.steveice10.opennbt.tag.builtin.CompoundTag;
-import com.github.steveice10.opennbt.tag.builtin.Tag;
-import com.nukkitx.math.vector.Vector3i;
 import lombok.Getter;
 import lombok.Setter;
 import lombok.ToString;
+import org.checkerframework.checker.nullness.qual.NonNull;
+import org.cloudburstmc.math.vector.Vector3i;
+import org.cloudburstmc.protocol.bedrock.data.definitions.ItemDefinition;
 import org.geysermc.geyser.GeyserImpl;
-import org.geysermc.geyser.registry.type.ItemMapping;
+import org.geysermc.geyser.item.Items;
 import org.geysermc.geyser.session.GeyserSession;
-import org.geysermc.geyser.translator.inventory.item.ItemTranslator;
+import org.geysermc.geyser.translator.item.ItemTranslator;
+import org.geysermc.mcprotocollib.protocol.data.game.inventory.ContainerType;
+import org.geysermc.mcprotocollib.protocol.data.game.item.component.DataComponentType;
 import org.jetbrains.annotations.Range;
 
-import javax.annotation.Nonnull;
 import java.util.Arrays;
 
 @ToString
 public abstract class Inventory {
     @Getter
-    protected final int id;
+    protected final int javaId;
 
     /**
      * The Java inventory state ID from the server. As of Java Edition 1.18.1 this value has one instance per player.
@@ -90,17 +89,29 @@ public abstract class Inventory {
     @Setter
     private boolean pending = false;
 
+    @Getter
+    @Setter
+    private boolean displayed = false;
+
     protected Inventory(int id, int size, ContainerType containerType) {
         this("Inventory", id, size, containerType);
     }
 
-    protected Inventory(String title, int id, int size, ContainerType containerType) {
+    protected Inventory(String title, int javaId, int size, ContainerType containerType) {
         this.title = title;
-        this.id = id;
+        this.javaId = javaId;
         this.size = size;
         this.containerType = containerType;
         this.items = new GeyserItemStack[size];
         Arrays.fill(items, GeyserItemStack.EMPTY);
+    }
+
+    // This is to prevent conflicts with special bedrock inventory IDs.
+    // The vanilla java server only sends an ID between 1 and 100 when opening an inventory,
+    // so this is rarely needed. (certain plugins)
+    // Example: https://github.com/GeyserMC/Geyser/issues/3254
+    public int getBedrockId() {
+        return javaId <= 100 ? javaId : (javaId % 100) + 1;
     }
 
     public GeyserItemStack getItem(int slot) {
@@ -113,7 +124,7 @@ public abstract class Inventory {
 
     public abstract int getOffsetForHotbar(@Range(from = 0, to = 8) int slot);
 
-    public void setItem(int slot, @Nonnull GeyserItemStack newItem, GeyserSession session) {
+    public void setItem(int slot, @NonNull GeyserItemStack newItem, GeyserSession session) {
         if (slot > this.size) {
             session.getGeyser().getLogger().debug("Tried to set an item out of bounds! " + this);
             return;
@@ -123,22 +134,19 @@ public abstract class Inventory {
         items[slot] = newItem;
 
         // Lodestone caching
-        if (newItem.getJavaId() == session.getItemMappings().getStoredItems().compass().getJavaId()) {
-            CompoundTag nbt = newItem.getNbt();
-            if (nbt != null) {
-                Tag lodestoneTag = nbt.get("LodestoneTracked");
-                if (lodestoneTag instanceof ByteTag) {
-                    session.getLodestoneCache().cacheInventoryItem(newItem);
-                }
+        if (newItem.asItem() == Items.COMPASS) {
+            var tracker = newItem.getComponent(DataComponentType.LODESTONE_TRACKER);
+            if (tracker != null) {
+                session.getLodestoneCache().cacheInventoryItem(newItem, tracker);
             }
         }
     }
 
     protected void updateItemNetId(GeyserItemStack oldItem, GeyserItemStack newItem, GeyserSession session) {
         if (!newItem.isEmpty()) {
-            ItemMapping oldMapping = ItemTranslator.getBedrockItemMapping(session, oldItem);
-            ItemMapping newMapping = ItemTranslator.getBedrockItemMapping(session, newItem);
-            if (oldMapping.getBedrockId() == newMapping.getBedrockId()) {
+            ItemDefinition oldMapping = ItemTranslator.getBedrockItemDefinition(session, oldItem);
+            ItemDefinition newMapping = ItemTranslator.getBedrockItemDefinition(session, newItem);
+            if (oldMapping.equals(newMapping)) {
                 newItem.setNetId(oldItem.getNetId());
             } else {
                 newItem.setNetId(session.getNextItemNetId());

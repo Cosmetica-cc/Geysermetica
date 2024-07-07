@@ -25,29 +25,28 @@
 
 package org.geysermc.geyser.entity.type.living;
 
-import com.github.steveice10.mc.protocol.data.game.entity.metadata.type.ByteEntityMetadata;
-import com.github.steveice10.mc.protocol.data.game.entity.player.Hand;
-import com.nukkitx.math.vector.Vector3f;
-import com.nukkitx.protocol.bedrock.data.entity.EntityData;
-import com.nukkitx.protocol.bedrock.data.entity.EntityFlag;
-import lombok.Getter;
+import org.checkerframework.checker.nullness.qual.NonNull;
+import org.cloudburstmc.math.vector.Vector3f;
+import org.cloudburstmc.protocol.bedrock.data.entity.EntityDataTypes;
+import org.cloudburstmc.protocol.bedrock.data.entity.EntityFlag;
 import org.geysermc.geyser.entity.EntityDefinition;
+import org.geysermc.geyser.entity.type.Leashable;
 import org.geysermc.geyser.entity.type.LivingEntity;
 import org.geysermc.geyser.inventory.GeyserItemStack;
-import org.geysermc.geyser.inventory.item.StoredItemMappings;
-import org.geysermc.geyser.registry.type.ItemMapping;
+import org.geysermc.geyser.item.Items;
+import org.geysermc.geyser.item.type.SpawnEggItem;
 import org.geysermc.geyser.session.GeyserSession;
 import org.geysermc.geyser.util.InteractionResult;
 import org.geysermc.geyser.util.InteractiveTag;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.metadata.type.ByteEntityMetadata;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.player.Hand;
 
-import javax.annotation.Nonnull;
 import java.util.UUID;
 
-public class MobEntity extends LivingEntity {
+public class MobEntity extends LivingEntity implements Leashable {
     /**
      * If another mob is holding this mob by a leash, this variable tracks their Bedrock entity ID.
      */
-    @Getter
     private long leashHolderBedrockId;
 
     public MobEntity(GeyserSession session, int entityId, long geyserId, UUID uuid, EntityDefinition<?> definition, Vector3f position, Vector3f motion, float yaw, float pitch, float headYaw) {
@@ -65,9 +64,10 @@ public class MobEntity extends LivingEntity {
         setFlag(EntityFlag.NO_AI, (xd & 0x01) == 0x01);
     }
 
+    @Override
     public void setLeashHolderBedrockId(long bedrockId) {
         this.leashHolderBedrockId = bedrockId;
-        dirtyMetadata.put(EntityData.LEASH_HOLDER_EID, bedrockId);
+        dirtyMetadata.put(EntityDataTypes.LEASH_HOLDER, bedrockId);
     }
 
     @Override
@@ -79,18 +79,14 @@ public class MobEntity extends LivingEntity {
             return InteractiveTag.REMOVE_LEASH;
         } else {
             GeyserItemStack itemStack = session.getPlayerInventory().getItemInHand(hand);
-            StoredItemMappings storedItems = session.getItemMappings().getStoredItems();
-            if (itemStack.getJavaId() == storedItems.lead() && canBeLeashed()) {
-                // We shall leash
-                return InteractiveTag.LEASH;
-            } else if (itemStack.getJavaId() == storedItems.nameTag()) {
+            if (itemStack.asItem() == Items.NAME_TAG) {
                 InteractionResult result = checkInteractWithNameTag(itemStack);
                 if (result.consumesAction()) {
                     return InteractiveTag.NAME;
                 }
             }
 
-            InteractiveTag tag = testMobInteraction(itemStack);
+            InteractiveTag tag = testMobInteraction(hand, itemStack);
             return tag != InteractiveTag.NONE ? tag : super.testInteraction(hand);
         }
     }
@@ -100,34 +96,26 @@ public class MobEntity extends LivingEntity {
         if (!isAlive()) {
             // dead lol
             return InteractionResult.PASS;
-        } else if (leashHolderBedrockId == session.getPlayerEntity().getGeyserId()) {
-            // TODO looks like the client assumes it will go through and removes the attachment itself?
-            return InteractionResult.SUCCESS;
         } else {
             GeyserItemStack itemInHand = session.getPlayerInventory().getItemInHand(hand);
             InteractionResult result = checkPriorityInteractions(itemInHand);
             if (result.consumesAction()) {
                 return result;
             } else {
-                InteractionResult mobResult = mobInteract(itemInHand);
+                InteractionResult mobResult = mobInteract(hand, itemInHand);
                 return mobResult.consumesAction() ? mobResult : super.interact(hand);
             }
         }
     }
 
     private InteractionResult checkPriorityInteractions(GeyserItemStack itemInHand) {
-        StoredItemMappings storedItems = session.getItemMappings().getStoredItems();
-        if (itemInHand.getJavaId() == storedItems.lead() && canBeLeashed()) {
-            // We shall leash
-            return InteractionResult.SUCCESS;
-        } else if (itemInHand.getJavaId() == storedItems.nameTag()) {
+        if (itemInHand.asItem() == Items.NAME_TAG) {
             InteractionResult result = checkInteractWithNameTag(itemInHand);
             if (result.consumesAction()) {
                 return result;
             }
         } else {
-            ItemMapping mapping = itemInHand.getMapping(session);
-            if (mapping.getJavaIdentifier().endsWith("_spawn_egg")) {
+            if (itemInHand.asItem() instanceof SpawnEggItem) {
                 // Using the spawn egg on this entity to create a child
                 return InteractionResult.CONSUME;
             }
@@ -136,22 +124,24 @@ public class MobEntity extends LivingEntity {
         return InteractionResult.PASS;
     }
 
-    @Nonnull
-    protected InteractiveTag testMobInteraction(@Nonnull GeyserItemStack itemInHand) {
+    @NonNull
+    protected InteractiveTag testMobInteraction(@NonNull Hand hand, @NonNull GeyserItemStack itemInHand) {
         return InteractiveTag.NONE;
     }
 
-    @Nonnull
-    protected InteractionResult mobInteract(@Nonnull GeyserItemStack itemInHand) {
+    @NonNull
+    protected InteractionResult mobInteract(@NonNull Hand hand, @NonNull GeyserItemStack itemInHand) {
         return InteractionResult.PASS;
     }
 
-    protected boolean canBeLeashed() {
+    @Override
+    public boolean canBeLeashed() {
         return isNotLeashed() && !isEnemy();
     }
 
-    protected final boolean isNotLeashed() {
-        return leashHolderBedrockId == -1L;
+    @Override
+    public long leashHolderBedrockId() {
+        return leashHolderBedrockId;
     }
 
     /**

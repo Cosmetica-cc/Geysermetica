@@ -25,28 +25,27 @@
 
 package org.geysermc.geyser.translator.protocol.java.level;
 
-import com.github.steveice10.mc.protocol.data.game.entity.metadata.Position;
-import com.github.steveice10.mc.protocol.packet.ingame.clientbound.level.ClientboundBlockUpdatePacket;
-import com.nukkitx.math.vector.Vector3i;
-import com.nukkitx.protocol.bedrock.data.SoundEvent;
-import com.nukkitx.protocol.bedrock.packet.LevelSoundEventPacket;
-import org.geysermc.common.PlatformType;
+import org.cloudburstmc.math.vector.Vector3i;
+import org.cloudburstmc.protocol.bedrock.data.SoundEvent;
+import org.cloudburstmc.protocol.bedrock.packet.LevelSoundEventPacket;
+import org.geysermc.geyser.api.util.PlatformType;
+import org.geysermc.geyser.item.type.Item;
+import org.geysermc.geyser.level.block.type.BlockState;
 import org.geysermc.geyser.session.GeyserSession;
 import org.geysermc.geyser.translator.protocol.PacketTranslator;
 import org.geysermc.geyser.translator.protocol.Translator;
 import org.geysermc.geyser.translator.sound.BlockSoundInteractionTranslator;
-import org.geysermc.geyser.registry.BlockRegistries;
-import org.geysermc.geyser.util.ChunkUtils;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.ClientboundBlockUpdatePacket;
 
 @Translator(packet = ClientboundBlockUpdatePacket.class)
 public class JavaBlockUpdateTranslator extends PacketTranslator<ClientboundBlockUpdatePacket> {
 
     @Override
     public void translate(GeyserSession session, ClientboundBlockUpdatePacket packet) {
-        Position pos = packet.getEntry().getPosition();
+        Vector3i pos = packet.getEntry().getPosition();
         boolean updatePlacement = session.getGeyser().getPlatformType() != PlatformType.SPIGOT && // Spigot simply listens for the block place event
-                session.getGeyser().getWorldManager().getBlockAt(session, pos) != packet.getEntry().getBlock();
-        ChunkUtils.updateBlock(session, packet.getEntry().getBlock(), pos);
+                !session.getErosionHandler().isActive() && session.getGeyser().getWorldManager().getBlockAt(session, pos) != packet.getEntry().getBlock();
+        session.getWorldCache().updateServerCorrectBlockState(pos, packet.getEntry().getBlock());
         if (updatePlacement) {
             this.checkPlace(session, packet);
         }
@@ -67,14 +66,14 @@ public class JavaBlockUpdateTranslator extends PacketTranslator<ClientboundBlock
         // We need to check if the identifier is the same, else a packet with the sound of what the
         // player has in their hand is played, despite if the block is being placed or not
         boolean contains = false;
-        String identifier = BlockRegistries.JAVA_BLOCKS.get(packet.getEntry().getBlock()).getItemIdentifier();
-        if (identifier.equals(session.getLastBlockPlacedId())) {
+        Item item = BlockState.of(packet.getEntry().getBlock()).block().asItem();
+        if (item == session.getLastBlockPlaced()) {
             contains = true;
         }
 
         if (!contains) {
             session.setLastBlockPlacePosition(null);
-            session.setLastBlockPlacedId(null);
+            session.setLastBlockPlaced(null);
             return false;
         }
 
@@ -87,7 +86,7 @@ public class JavaBlockUpdateTranslator extends PacketTranslator<ClientboundBlock
         placeBlockSoundPacket.setIdentifier(":");
         session.sendUpstreamPacket(placeBlockSoundPacket);
         session.setLastBlockPlacePosition(null);
-        session.setLastBlockPlacedId(null);
+        session.setLastBlockPlaced(null);
         return true;
     }
 
@@ -101,7 +100,7 @@ public class JavaBlockUpdateTranslator extends PacketTranslator<ClientboundBlock
                 || lastInteractPos.getZ() != packet.getEntry().getPosition().getZ())) {
             return;
         }
-        String identifier = BlockRegistries.JAVA_IDENTIFIERS.get().get(packet.getEntry().getBlock());
+        String identifier = BlockState.of(packet.getEntry().getBlock()).toString(); // This will be yeeted soon. Thanks Chris.
         session.setInteracting(false);
         BlockSoundInteractionTranslator.handleBlockInteraction(session, lastInteractPos.toFloat(), identifier);
     }

@@ -25,150 +25,102 @@
 
 package org.geysermc.geyser.text;
 
-import com.fasterxml.jackson.annotation.JsonIgnoreProperties;
-import com.fasterxml.jackson.annotation.JsonProperty;
 import com.fasterxml.jackson.databind.JsonNode;
-import lombok.Getter;
+import org.checkerframework.checker.nullness.qual.Nullable;
 import org.geysermc.geyser.GeyserImpl;
-import org.geysermc.geyser.network.MinecraftProtocol;
+import org.geysermc.geyser.util.AssetUtils;
 import org.geysermc.geyser.util.FileUtils;
 import org.geysermc.geyser.util.WebUtils;
 
-import java.io.*;
+import java.io.FileNotFoundException;
+import java.io.IOException;
+import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.*;
-import java.util.concurrent.CompletableFuture;
-import java.util.zip.ZipFile;
+import java.nio.file.StandardOpenOption;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.Locale;
+import java.util.Map;
 
 public class MinecraftLocale {
 
     public static final Map<String, Map<String, String>> LOCALE_MAPPINGS = new HashMap<>();
 
-    private static final Map<String, Asset> ASSET_MAP = new HashMap<>();
-
-    private static VersionDownload clientJarInfo;
+    private static final Path LOCALE_FOLDER = GeyserImpl.getInstance().getBootstrap().getConfigFolder().resolve("locales");
 
     static {
-        // Create the locales folder
-        File localesFolder = GeyserImpl.getInstance().getBootstrap().getConfigFolder().resolve("locales").toFile();
-        //noinspection ResultOfMethodCallIgnored
-        localesFolder.mkdir();
+        try {
+            // Create the locales folder
+            Files.createDirectories(LOCALE_FOLDER);
+            Files.createDirectories(LOCALE_FOLDER.resolve("overrides"));
+        } catch (IOException exception) {
+            throw new RuntimeException("Unable to create locale folders! " + exception.getMessage());
+        }
+    }
 
-        // Download the latest asset list and cache it
-        generateAssetCache().whenComplete((aVoid, ex) -> downloadAndLoadLocale(GeyserLocale.getDefaultLocale()));
+    public static void ensureEN_US() {
+        Path localeFile = getPath("en_us");
+        AssetUtils.addTask(!Files.exists(localeFile), new AssetUtils.ClientJarTask("assets/minecraft/lang/en_us.json",
+                (stream) -> AssetUtils.saveFile(localeFile, stream),
+                () -> {
+                    if ("en_us".equals(GeyserLocale.getDefaultLocale())) {
+                        loadLocale("en_us");
+                    }
+                }));
     }
 
     /**
-     * Fetch the latest versions asset cache from Mojang so we can grab the locale files later
-     */
-    private static CompletableFuture<Void> generateAssetCache() {
-        return CompletableFuture.supplyAsync(() -> {
-            try {
-                // Get the version manifest from Mojang
-                VersionManifest versionManifest = GeyserImpl.JSON_MAPPER.readValue(WebUtils.getBody("https://launchermeta.mojang.com/mc/game/version_manifest.json"), VersionManifest.class);
-
-                // Get the url for the latest version of the games manifest
-                String latestInfoURL = "";
-                for (Version version : versionManifest.getVersions()) {
-                    if (version.getId().equals(MinecraftProtocol.getJavaCodec().getMinecraftVersion())) {
-                        latestInfoURL = version.getUrl();
-                        break;
-                    }
-                }
-
-                // Make sure we definitely got a version
-                if (latestInfoURL.isEmpty()) {
-                    throw new Exception(GeyserLocale.getLocaleStringLog("geyser.locale.fail.latest_version"));
-                }
-
-                // Get the individual version manifest
-                VersionInfo versionInfo = GeyserImpl.JSON_MAPPER.readValue(WebUtils.getBody(latestInfoURL), VersionInfo.class);
-
-                // Get the client jar for use when downloading the en_us locale
-                GeyserImpl.getInstance().getLogger().debug(GeyserImpl.JSON_MAPPER.writeValueAsString(versionInfo.getDownloads()));
-                clientJarInfo = versionInfo.getDownloads().get("client");
-                GeyserImpl.getInstance().getLogger().debug(GeyserImpl.JSON_MAPPER.writeValueAsString(clientJarInfo));
-
-                // Get the assets list
-                JsonNode assets = GeyserImpl.JSON_MAPPER.readTree(WebUtils.getBody(versionInfo.getAssetIndex().getUrl())).get("objects");
-
-                // Put each asset into an array for use later
-                Iterator<Map.Entry<String, JsonNode>> assetIterator = assets.fields();
-                while (assetIterator.hasNext()) {
-                    Map.Entry<String, JsonNode> entry = assetIterator.next();
-                    if (!entry.getKey().startsWith("minecraft/lang/")) {
-                        // No need to cache non-language assets as we don't use them
-                        continue;
-                    }
-
-                    Asset asset = GeyserImpl.JSON_MAPPER.treeToValue(entry.getValue(), Asset.class);
-                    ASSET_MAP.put(entry.getKey(), asset);
-                }
-            } catch (Exception e) {
-                GeyserImpl.getInstance().getLogger().error(GeyserLocale.getLocaleStringLog("geyser.locale.fail.asset_cache", (!e.getMessage().isEmpty() ? e.getMessage() : e.getStackTrace())));
-            }
-            return null;
-        });
-    }
-
-    /**
-     * Downloads a locale from Mojang if its not already loaded
+     * Downloads a locale from Mojang if it's not already loaded
      *
      * @param locale Locale to download and load
      */
     public static void downloadAndLoadLocale(String locale) {
         locale = locale.toLowerCase(Locale.ROOT);
+
+        if (isLocaleLoaded(locale)) {
+            GeyserImpl.getInstance().getLogger().debug("Locale already loaded: " + locale);
+            return;
+        }
+
         if (locale.equals("nb_no")) {
-            // Different locale code - https://minecraft.fandom.com/wiki/Language
+            // Different locale code - https://minecraft.wiki/w/Language
             locale = "no_no";
         }
 
         // Check the locale isn't already loaded
-        if (!ASSET_MAP.containsKey("minecraft/lang/" + locale + ".json") && !locale.equals("en_us")) {
-            GeyserImpl.getInstance().getLogger().warning(GeyserLocale.getLocaleStringLog("geyser.locale.fail.invalid", locale));
+        if (!AssetUtils.isAssetKnown("minecraft/lang/" + locale + ".json") && !locale.equals("en_us")) {
+            if (loadLocale(locale)) {
+                GeyserImpl.getInstance().getLogger().debug("Loaded locale locally while not being in asset map: " + locale);
+            } else {
+                GeyserImpl.getInstance().getLogger().warning(GeyserLocale.getLocaleStringLog("geyser.locale.fail.invalid", locale));
+            }
             return;
         }
 
         GeyserImpl.getInstance().getLogger().debug("Downloading and loading locale: " + locale);
 
         downloadLocale(locale);
-        loadLocale(locale);
+        if (!loadLocale(locale)) {
+            GeyserImpl.getInstance().getLogger().warning(GeyserLocale.getLocaleStringLog("geyser.locale.fail.missing", locale));
+        }
     }
 
     /**
-     * Downloads the specified locale if its not already downloaded
+     * Downloads the specified locale if it's not already downloaded
      *
      * @param locale Locale to download
      */
     private static void downloadLocale(String locale) {
-        File localeFile = GeyserImpl.getInstance().getBootstrap().getConfigFolder().resolve("locales/" + locale + ".json").toFile();
+        if (locale.equals("en_us")) {
+            return;
+        }
+        Path localeFile = getPath(locale);
 
         // Check if we have already downloaded the locale file
-        if (localeFile.exists()) {
-            String curHash = "";
-            String targetHash;
-
-            if (locale.equals("en_us")) {
-                try {
-                    File hashFile = GeyserImpl.getInstance().getBootstrap().getConfigFolder().resolve("locales/en_us.hash").toFile();
-                    if (hashFile.exists()) {
-                        try (BufferedReader br = new BufferedReader(new FileReader(hashFile))) {
-                            curHash = br.readLine().trim();
-                        }
-                    }
-                } catch (IOException ignored) { }
-
-                if (clientJarInfo == null) {
-                    // Likely failed to download
-                    GeyserImpl.getInstance().getLogger().debug("Skipping en_US hash check as client jar is null.");
-                    return;
-                }
-                targetHash = clientJarInfo.getSha1();
-            } else {
-                curHash = byteArrayToHexString(FileUtils.calculateSHA1(localeFile));
-                targetHash = ASSET_MAP.get("minecraft/lang/" + locale + ".json").getHash();
-            }
+        if (Files.exists(localeFile)) {
+            String curHash = byteArrayToHexString(FileUtils.calculateSHA1(localeFile));
+            String targetHash = AssetUtils.getAsset("minecraft/lang/" + locale + ".json").getHash();
 
             if (!curHash.equals(targetHash)) {
                 GeyserImpl.getInstance().getLogger().debug("Locale out of date; re-downloading: " + locale);
@@ -178,47 +130,66 @@ public class MinecraftLocale {
             }
         }
 
-        // Create the en_us locale
-        if (locale.equals("en_us")) {
-            downloadEN_US(localeFile);
-
-            return;
-        }
-
         try {
             // Get the hash and download the locale
-            String hash = ASSET_MAP.get("minecraft/lang/" + locale + ".json").getHash();
+            String hash = AssetUtils.getAsset("minecraft/lang/" + locale + ".json").getHash();
             WebUtils.downloadFile("https://resources.download.minecraft.net/" + hash.substring(0, 2) + "/" + hash, localeFile.toString());
         } catch (Exception e) {
             GeyserImpl.getInstance().getLogger().error("Unable to download locale file hash", e);
         }
     }
 
+    private static Path getPath(String locale) {
+        return LOCALE_FOLDER.resolve(locale + ".json");
+    }
+
     /**
      * Loads a locale already downloaded, if the file doesn't exist it just logs a warning
      *
-     * @param locale Locale to load
+     * @param locale Bedrock locale to load
      */
-    private static void loadLocale(String locale) {
-        File localeFile = GeyserImpl.getInstance().getBootstrap().getConfigFolder().resolve("locales/" + locale + ".json").toFile();
+    private static boolean loadLocale(String locale) {
+        String lowercaseLocale = locale.toLowerCase(Locale.ROOT);
 
-        // Load the locale
-        if (localeFile.exists()) {
-            // Read the localefile
-            InputStream localeStream;
-            try {
-                localeStream = new FileInputStream(localeFile);
-            } catch (FileNotFoundException e) {
-                throw new AssertionError(GeyserLocale.getLocaleStringLog("geyser.locale.fail.file", locale, e.getMessage()));
-            }
+        // Need to grab this before we change the locale - downloaded/override locales are stored under the Java locale name
+        Path localeFile = getPath(lowercaseLocale);
+        Path localeOverride = getPath("overrides/" + lowercaseLocale);
 
+        if (lowercaseLocale.equals("no_no")) {
+            // Store this locale under the Bedrock locale, so we don't need to do this check over and over
+            lowercaseLocale = "nb_no";
+        }
+
+        Map<String, String> langMap = new HashMap<>();
+        if (Files.exists(localeFile) && Files.isReadable(localeFile)) {
+            langMap.putAll(parseLangFile(localeFile, lowercaseLocale));
+        }
+
+        // Load the locale overwrites
+        if (Files.exists(localeOverride) && Files.isReadable(localeOverride)) {
+            langMap.putAll(parseLangFile(localeOverride, lowercaseLocale));
+        }
+
+        if (!langMap.isEmpty()) {
+            LOCALE_MAPPINGS.put(lowercaseLocale, langMap);
+            return true;
+        } else {
+            return false;
+        }
+    }
+
+    /**
+     * Load and parse a json lang file.
+     *
+     * @param localeFile Path of locale file
+     * @param locale Locale to load
+     * @return a Map of the loaded translations
+     */
+    public static Map<String, String> parseLangFile(Path localeFile, String locale) {
+        // Read the localefile
+        try (InputStream localeStream = Files.newInputStream(localeFile, StandardOpenOption.READ)) {
             // Parse the file as json
-            JsonNode localeObj;
-            try {
-                localeObj = GeyserImpl.JSON_MAPPER.readTree(localeStream);
-            } catch (Exception e) {
-                throw new AssertionError(GeyserLocale.getLocaleStringLog("geyser.locale.fail.json", locale), e);
-            }
+            JsonNode localeObj = GeyserImpl.JSON_MAPPER.readTree(localeStream);
 
             // Parse all the locale fields
             Iterator<Map.Entry<String, JsonNode>> localeIterator = localeObj.fields();
@@ -227,68 +198,11 @@ public class MinecraftLocale {
                 Map.Entry<String, JsonNode> entry = localeIterator.next();
                 langMap.put(entry.getKey(), entry.getValue().asText());
             }
-
-            String bedrockLocale = locale.toLowerCase(Locale.ROOT);
-            if (bedrockLocale.equals("no_no")) {
-                // Store this locale under the Bedrock locale so we don't need to do this check over and over
-                bedrockLocale = "nb_no";
-            }
-
-            // Insert the locale into the mappings
-            LOCALE_MAPPINGS.put(bedrockLocale, langMap);
-
-            try {
-                localeStream.close();
-            } catch (IOException e) {
-                throw new AssertionError(GeyserLocale.getLocaleStringLog("geyser.locale.fail.file", locale, e.getMessage()));
-            }
-        } else {
-            GeyserImpl.getInstance().getLogger().warning(GeyserLocale.getLocaleStringLog("geyser.locale.fail.missing", locale));
-        }
-    }
-
-    /**
-     * Download then en_us locale by downloading the server jar and extracting it from there.
-     *
-     * @param localeFile File to save the locale to
-     */
-    private static void downloadEN_US(File localeFile) {
-        try {
-            // Let the user know we are downloading the JAR
-            GeyserImpl.getInstance().getLogger().info(GeyserLocale.getLocaleStringLog("geyser.locale.download.en_us"));
-            GeyserImpl.getInstance().getLogger().debug("Download URL: " + clientJarInfo.getUrl());
-
-            // Download the smallest JAR (client or server)
-            Path tmpFilePath = GeyserImpl.getInstance().getBootstrap().getConfigFolder().resolve("tmp_locale.jar");
-            WebUtils.downloadFile(clientJarInfo.getUrl(), tmpFilePath.toString());
-
-            // Load in the JAR as a zip and extract the file
-            try (ZipFile localeJar = new ZipFile(tmpFilePath.toString())) {
-                try (InputStream fileStream = localeJar.getInputStream(localeJar.getEntry("assets/minecraft/lang/en_us.json"))) {
-                    try (FileOutputStream outStream = new FileOutputStream(localeFile)) {
-
-                        // Write the file to the locale dir
-                        byte[] buf = new byte[fileStream.available()];
-                        int length;
-                        while ((length = fileStream.read(buf)) != -1) {
-                            outStream.write(buf, 0, length);
-                        }
-
-                        // Flush all changes to disk and cleanup
-                        outStream.flush();
-                    }
-                }
-            }
-
-            // Store the latest jar hash
-            FileUtils.writeFile(GeyserImpl.getInstance().getBootstrap().getConfigFolder().resolve("locales/en_us.hash").toString(), clientJarInfo.getSha1().toCharArray());
-
-            // Delete the nolonger needed client/server jar
-            Files.delete(tmpFilePath);
-
-            GeyserImpl.getInstance().getLogger().info(GeyserLocale.getLocaleStringLog("geyser.locale.download.en_us.done"));
+            return langMap;
+        } catch (FileNotFoundException e){
+            throw new AssertionError(GeyserLocale.getLocaleStringLog("geyser.locale.fail.file", locale, e.getMessage()));
         } catch (Exception e) {
-            GeyserImpl.getInstance().getLogger().error(GeyserLocale.getLocaleStringLog("geyser.locale.fail.en_us"), e);
+            throw new AssertionError(GeyserLocale.getLocaleStringLog("geyser.locale.fail.json", locale), e);
         }
     }
 
@@ -300,9 +214,9 @@ public class MinecraftLocale {
      * @return Translated string or the original message if it was not found in the given locale
      */
     public static String getLocaleString(String messageText, String locale) {
-        Map<String, String> localeStrings = MinecraftLocale.LOCALE_MAPPINGS.get(locale.toLowerCase());
+        Map<String, String> localeStrings = LOCALE_MAPPINGS.get(locale.toLowerCase(Locale.ROOT));
         if (localeStrings == null) {
-            localeStrings = MinecraftLocale.LOCALE_MAPPINGS.get(GeyserLocale.getDefaultLocale());
+            localeStrings = LOCALE_MAPPINGS.get(GeyserLocale.getDefaultLocale());
             if (localeStrings == null) {
                 // Don't cause a NPE if the locale is STILL missing
                 GeyserImpl.getInstance().getLogger().debug("MISSING DEFAULT LOCALE: " + GeyserLocale.getDefaultLocale());
@@ -311,6 +225,32 @@ public class MinecraftLocale {
         }
 
         return localeStrings.getOrDefault(messageText, messageText);
+    }
+
+    /**
+     * Translate the given language string into the given locale, or returns null.
+     *
+     * @param messageText Language string to translate
+     * @param locale Locale to translate to
+     * @return Translated string or null if it was not found in the given locale
+     */
+    public static @Nullable String getLocaleStringIfPresent(String messageText, String locale) {
+        Map<String, String> localeStrings = LOCALE_MAPPINGS.get(locale.toLowerCase(Locale.ROOT));
+        if (localeStrings != null) {
+            return localeStrings.get(messageText);
+        }
+
+        return null;
+    }
+
+    /**
+     * Checks if a locale has been loaded.
+     *
+     * @param locale Locale to check
+     * @return true if the locale has been loaded
+     */
+    public static boolean isLocaleLoaded(String locale) {
+        return LOCALE_MAPPINGS.containsKey(locale.toLowerCase(Locale.ROOT));
     }
 
     /**
@@ -325,112 +265,5 @@ public class MinecraftLocale {
             result.append(Integer.toString((value & 0xff) + 0x100, 16).substring(1));
         }
         return result.toString();
-    }
-
-    public static void init() {
-        // no-op
-    }
-
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    @Getter
-    static class VersionManifest {
-        @JsonProperty("latest")
-        private LatestVersion latestVersion;
-
-        @JsonProperty("versions")
-        private List<Version> versions;
-    }
-
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    @Getter
-    static class LatestVersion {
-        @JsonProperty("release")
-        private String release;
-
-        @JsonProperty("snapshot")
-        private String snapshot;
-    }
-
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    @Getter
-    static class Version {
-        @JsonProperty("id")
-        private String id;
-
-        @JsonProperty("type")
-        private String type;
-
-        @JsonProperty("url")
-        private String url;
-
-        @JsonProperty("time")
-        private String time;
-
-        @JsonProperty("releaseTime")
-        private String releaseTime;
-    }
-
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    @Getter
-    static class VersionInfo {
-        @JsonProperty("id")
-        private String id;
-
-        @JsonProperty("type")
-        private String type;
-
-        @JsonProperty("time")
-        private String time;
-
-        @JsonProperty("releaseTime")
-        private String releaseTime;
-
-        @JsonProperty("assetIndex")
-        private AssetIndex assetIndex;
-
-        @JsonProperty("downloads")
-        private Map<String, VersionDownload> downloads;
-    }
-
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    @Getter
-    static class VersionDownload {
-        @JsonProperty("sha1")
-        private String sha1;
-
-        @JsonProperty("size")
-        private int size;
-
-        @JsonProperty("url")
-        private String url;
-    }
-
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    @Getter
-    static class AssetIndex {
-        @JsonProperty("id")
-        private String id;
-
-        @JsonProperty("sha1")
-        private String sha1;
-
-        @JsonProperty("size")
-        private int size;
-
-        @JsonProperty("totalSize")
-        private int totalSize;
-
-        @JsonProperty("url")
-        private String url;
-    }
-
-    @JsonIgnoreProperties(ignoreUnknown = true)
-    @Getter
-    static class Asset {
-        @JsonProperty("hash")
-        private String hash;
-
-        @JsonProperty("size")
-        private int size;
     }
 }

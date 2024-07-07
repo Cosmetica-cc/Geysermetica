@@ -28,6 +28,9 @@ package org.geysermc.geyser.level;
 import lombok.AccessLevel;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
+import net.kyori.adventure.key.Key;
+
+import java.util.Locale;
 
 @AllArgsConstructor(access = AccessLevel.PRIVATE)
 @Getter
@@ -56,26 +59,45 @@ public enum PaintingType {
     SKELETON("Skeleton", 4, 3),
     DONKEY_KONG("DonkeyKong", 4, 3),
     POINTER("Pointer", 4, 4),
-    PIG_SCENE("Pigscene", 4, 4),
-    BURNING_SKULL("BurningSkull", 4, 4);
+    PIGSCENE("Pigscene", 4, 4),
+    BURNING_SKULL("BurningSkull", 4, 4),
+    EARTH("Earth", 2, 2),
+    WIND("Wind", 2, 2),
+    WATER("Water", 2, 2),
+    FIRE("Fire", 2, 2),
+    MEDITATIVE("meditative", 1, 1),
+    PRAIRIE_RIDE("prairie_ride", 1, 2),
+    BAROQUE("baroque", 2, 2),
+    HUMBLE("humble", 2, 2),
+    UNPACKED("unpacked", 4, 4),
+    BACKYARD("backyard", 3, 4),
+    BOUQUET("bouquet", 3, 3),
+    CAVEBIRD("cavebird", 3, 3),
+    CHANGING("changing", 4, 2),
+    COTAN("cotan", 3, 3),
+    ENDBOSS("endboss", 3, 3),
+    FERN("fern", 3, 3),
+    FINDING("finding", 4, 2),
+    LOWMIST("lowmist", 4, 2),
+    ORB("orb", 4, 4),
+    OWLEMONS("owlemons", 3, 3),
+    PASSAGE("passage", 4, 2),
+    POND("pond", 3, 4),
+    SUNFLOWERS("sunflowers", 3, 3),
+    TIDES("tides", 3, 3);
 
     private static final PaintingType[] VALUES = values();
-    private String bedrockName;
-    private int width;
-    private int height;
+    private final String bedrockName;
+    private final int width;
+    private final int height;
 
-    public com.github.steveice10.mc.protocol.data.game.entity.type.PaintingType toJavaType() {
-        return com.github.steveice10.mc.protocol.data.game.entity.type.PaintingType.valueOf(name());
-    }
-
-    public static PaintingType getByName(String javaName) {
-        for (PaintingType paintingName : VALUES) {
-            if (paintingName.name().equalsIgnoreCase(javaName)) return paintingName;
+    public static PaintingType getByName(Key key) {
+        if (!key.namespace().equals("minecraft")) {
+            return null;
         }
-        return KEBAB;
-    }
-
-    public static PaintingType getByPaintingType(com.github.steveice10.mc.protocol.data.game.entity.type.PaintingType paintingType) {
-        return getByName(paintingType.name());
+        for (PaintingType paintingName : VALUES) {
+            if (paintingName.name().toLowerCase(Locale.ROOT).equals(key.value())) return paintingName;
+        }
+        return null;
     }
 }

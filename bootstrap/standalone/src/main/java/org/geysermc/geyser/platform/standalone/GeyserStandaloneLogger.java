@@ -25,17 +25,17 @@
 
 package org.geysermc.geyser.platform.standalone;
 
-import lombok.extern.log4j.Log4j2;
+import lombok.extern.slf4j.Slf4j;
 import net.minecrell.terminalconsole.SimpleTerminalConsole;
 import org.apache.logging.log4j.Level;
 import org.apache.logging.log4j.core.config.Configurator;
 import org.geysermc.geyser.GeyserImpl;
 import org.geysermc.geyser.GeyserLogger;
-import org.geysermc.geyser.command.CommandSender;
+import org.geysermc.geyser.command.GeyserCommandSource;
 import org.geysermc.geyser.text.ChatColor;
 
-@Log4j2
-public class GeyserStandaloneLogger extends SimpleTerminalConsole implements GeyserLogger, CommandSender {
+@Slf4j
+public class GeyserStandaloneLogger extends SimpleTerminalConsole implements GeyserLogger, GeyserCommandSource {
 
     @Override
     protected boolean isRunning() {
@@ -44,22 +44,22 @@ public class GeyserStandaloneLogger extends SimpleTerminalConsole implements Gey
 
     @Override
     protected void runCommand(String line) {
-        GeyserImpl.getInstance().getCommandManager().runCommand(this, line);
+        GeyserImpl.getInstance().commandManager().runCommand(this, line);
     }
 
     @Override
     protected void shutdown() {
-        GeyserImpl.getInstance().getBootstrap().onDisable();
+        GeyserImpl.getInstance().getBootstrap().onGeyserShutdown();
     }
 
     @Override
     public void severe(String message) {
-        log.fatal(ChatColor.DARK_RED + message);
+        log.error(ChatColor.DARK_RED + message);
     }
 
     @Override
     public void severe(String message, Throwable error) {
-        log.fatal(ChatColor.DARK_RED + message, error);
+        log.error(ChatColor.DARK_RED + message, error);
     }
 
     @Override
@@ -92,27 +92,8 @@ public class GeyserStandaloneLogger extends SimpleTerminalConsole implements Gey
         Configurator.setLevel(log.getName(), debug ? Level.DEBUG : Level.INFO);
     }
 
+    @Override
     public boolean isDebug() {
         return log.isDebugEnabled();
-    }
-
-    @Override
-    public String name() {
-        return "CONSOLE";
-    }
-
-    @Override
-    public void sendMessage(String message) {
-        info(message);
-    }
-
-    @Override
-    public boolean isConsole() {
-        return true;
-    }
-
-    @Override
-    public boolean hasPermission(String permission) {
-        return true;
     }
 }

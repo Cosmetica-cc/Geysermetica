@@ -25,10 +25,10 @@
 
 package org.geysermc.geyser.translator.level.event;
 
-import com.github.steveice10.mc.protocol.packet.ingame.clientbound.level.ClientboundLevelEventPacket;
-import com.nukkitx.math.vector.Vector3f;
-import com.nukkitx.protocol.bedrock.data.SoundEvent;
-import com.nukkitx.protocol.bedrock.packet.LevelSoundEventPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.ClientboundLevelEventPacket;
+import org.cloudburstmc.math.vector.Vector3f;
+import org.cloudburstmc.protocol.bedrock.data.SoundEvent;
+import org.cloudburstmc.protocol.bedrock.packet.LevelSoundEventPacket;
 import org.geysermc.geyser.session.GeyserSession;
 
 public record SoundEventEventTranslator(SoundEvent soundEvent,
@@ -40,7 +40,7 @@ public record SoundEventEventTranslator(SoundEvent soundEvent,
         levelSoundEvent.setIdentifier(identifier);
         levelSoundEvent.setExtraData(extraData);
         levelSoundEvent.setRelativeVolumeDisabled(packet.isBroadcast());
-        levelSoundEvent.setPosition(Vector3f.from(packet.getPosition().getX(), packet.getPosition().getY(), packet.getPosition().getZ()).add(0.5f, 0.5f, 0.5f));
+        levelSoundEvent.setPosition(Vector3f.from(packet.getPosition().getX() + 0.5f, packet.getPosition().getY() + 0.5f, packet.getPosition().getZ() + 0.5f));
         levelSoundEvent.setBabySound(false);
         session.sendUpstreamPacket(levelSoundEvent);
     }

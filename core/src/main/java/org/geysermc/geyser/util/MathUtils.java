@@ -26,8 +26,73 @@
 package org.geysermc.geyser.util;
 
 public class MathUtils {
-
     public static final double SQRT_OF_TWO = Math.sqrt(2);
+
+    /**
+     * Wrap the given float degrees to be between -180.0 and 180.0.
+     * 
+     * @param degrees The degrees value to wrap
+     * @return The wrapped degrees value between -180.0 and 180.0
+     */
+    public static float wrapDegrees(float degrees) {
+        degrees = degrees % 360.0f;
+        if (degrees < -180.0f) {
+            degrees += 360.0f;
+        } else if (degrees >= 180.0f) {
+            degrees -= 360.0f;
+        }
+        return degrees;
+    }
+
+    /**
+     * Wrap the given double degrees to be between -180.0 and 180.0.
+     * 
+     * @param degrees The degrees value to wrap
+     * @return The wrapped degrees value between -180.0 and 180.0
+     */
+    public static float wrapDegrees(double degrees) {
+        return wrapDegrees((float) degrees);
+    }
+
+    /**
+     * Wrap the given degrees to be between -180 and 180 as an integer.
+     * 
+     * @param degrees The degrees value to wrap
+     * @return The wrapped degrees value between -180 and 180 as an integer
+     */
+    public static int wrapDegreesToInt(float degrees) {
+        return (int) wrapDegrees(degrees);
+    }
+
+    /**
+     * Unwrap the given float degrees to be between 0.0 and 360.0.
+     * 
+     * @param degrees The degrees value to unwrap
+     * @return The unwrapped degrees value between 0.0 and 360.0
+     */
+    public static float unwrapDegrees(float degrees) {
+        return (degrees % 360 + 360) % 360;
+    }
+
+    /**
+     * Unwrap the given double degrees to be between 0.0 and 360.0.
+     * 
+     * @param degrees The degrees value to unwrap
+     * @return The unwrapped degrees value between 0.0 and 360.0
+     */
+    public static float unwrapDegrees(double degrees) {
+        return unwrapDegrees((float) degrees);
+    }
+
+    /**
+     * Unwrap the given degrees to be between 0 and 360 as an integer.
+     * 
+     * @param degrees The degrees value to unwrap
+     * @return The unwrapped degrees value between 0 and 360 as an integer
+     */
+    public static int unwrapDegreesToInt(float degrees) {
+        return (int) unwrapDegrees(degrees);
+    }
 
     /**
      * Round the given float to the next whole number
@@ -85,14 +150,22 @@ public class MathUtils {
     }
 
     /**
-     * Ensures the resulting object is a byte. Java Edition does not care whether a byte is encoded as an integer or not;
-     * it converts it into a byte anyway.
+     * Clamps the value between the low and high boundaries
+     * Copied from {@link org.cloudburstmc.math.GenericMath} with floats instead.
      *
-     * @param value The value to convert
-     * @return The converted byte
+     * @param value The value to clamp
+     * @param low The low bound of the clamp
+     * @param high The high bound of the clamp
+     * @return the clamped value
      */
-    public static byte getNbtByte(Object value) {
-        return ((Number) value).byteValue();
+    public static float clamp(float value, float low, float high) {
+        if (value < low) {
+            return low;
+        }
+        if (value > high) {
+            return high;
+        }
+        return value;
     }
 
     /**
@@ -104,12 +177,5 @@ public class MathUtils {
      */
     public static long chunkPositionToLong(int x, int z) {
         return ((x & 0xFFFFFFFFL) << 32L) | (z & 0xFFFFFFFFL);
-    }
-
-    /**
-     * @return the bits per entry used when this number is the maximum amount of entries.
-     */
-    public static int getGlobalPaletteForSize(int size) {
-        return 32 - Integer.numberOfLeadingZeros(size - 1);
     }
 }

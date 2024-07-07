@@ -62,7 +62,7 @@ public final class ScoreboardUpdater extends Thread {
 
     @Override
     public void run() {
-        while (!geyser.isShuttingDown()) {
+        while (!geyser.isShuttingDown() && !geyser.isReloading()) {
             try {
                 long timeTillAction = getTimeTillNextAction();
                 if (timeTillAction > 0) {
@@ -118,7 +118,7 @@ public final class ScoreboardUpdater extends Thread {
                                             FIRST_SCORE_PACKETS_PER_SECOND_THRESHOLD;
 
                                     geyser.getLogger().info(
-                                            GeyserLocale.getLocaleStringLog("geyser.scoreboard.updater.threshold_reached.log", session.name(), threshold, pps) +
+                                            GeyserLocale.getLocaleStringLog("geyser.scoreboard.updater.threshold_reached.log", session.bedrockUsername(), threshold, pps) +
                                                     GeyserLocale.getLocaleStringLog("geyser.scoreboard.updater.threshold_reached", (millisBetweenUpdates / 1000.0))
                                     );
 
@@ -173,6 +173,7 @@ public final class ScoreboardUpdater extends Thread {
     @Getter
     public static final class ScoreboardSession {
         private final GeyserSession session;
+        @SuppressWarnings("WriteOnlyObject")
         private final AtomicInteger pendingPacketsPerSecond = new AtomicInteger(0);
         private int packetsPerSecond;
         private long lastUpdate;

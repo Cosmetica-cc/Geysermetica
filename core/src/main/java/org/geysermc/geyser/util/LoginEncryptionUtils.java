@@ -28,161 +28,76 @@ package org.geysermc.geyser.util;
 import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.node.JsonNodeType;
 import com.github.steveice10.mc.auth.service.MsaAuthenticationService;
-import com.nimbusds.jose.JWSObject;
-import com.nimbusds.jose.shaded.json.JSONObject;
-import com.nimbusds.jose.shaded.json.JSONValue;
-import com.nukkitx.network.util.Preconditions;
-import com.nukkitx.protocol.bedrock.packet.LoginPacket;
-import com.nukkitx.protocol.bedrock.packet.ServerToClientHandshakePacket;
-import com.nukkitx.protocol.bedrock.util.EncryptionUtils;
+import org.cloudburstmc.protocol.bedrock.packet.LoginPacket;
+import org.cloudburstmc.protocol.bedrock.packet.ServerToClientHandshakePacket;
+import org.cloudburstmc.protocol.bedrock.util.ChainValidationResult;
+import org.cloudburstmc.protocol.bedrock.util.ChainValidationResult.IdentityData;
+import org.cloudburstmc.protocol.bedrock.util.EncryptionUtils;
+import org.geysermc.cumulus.form.ModalForm;
+import org.geysermc.cumulus.form.SimpleForm;
+import org.geysermc.cumulus.response.SimpleFormResponse;
+import org.geysermc.cumulus.response.result.FormResponseResult;
+import org.geysermc.cumulus.response.result.ValidFormResponseResult;
 import org.geysermc.geyser.GeyserImpl;
-import org.geysermc.geyser.configuration.GeyserConfiguration;
 import org.geysermc.geyser.session.GeyserSession;
 import org.geysermc.geyser.session.auth.AuthData;
 import org.geysermc.geyser.session.auth.BedrockClientData;
-import org.geysermc.cumulus.CustomForm;
-import org.geysermc.cumulus.ModalForm;
-import org.geysermc.cumulus.SimpleForm;
-import org.geysermc.cumulus.response.CustomFormResponse;
-import org.geysermc.cumulus.response.ModalFormResponse;
-import org.geysermc.cumulus.response.SimpleFormResponse;
 import org.geysermc.geyser.text.ChatColor;
 import org.geysermc.geyser.text.GeyserLocale;
 
 import javax.crypto.SecretKey;
-import java.io.IOException;
-import java.net.URI;
 import java.security.KeyPair;
-import java.security.KeyPairGenerator;
 import java.security.PublicKey;
-import java.security.interfaces.ECPublicKey;
-import java.security.spec.ECGenParameterSpec;
-import java.util.Iterator;
-import java.util.UUID;
+import java.util.List;
+import java.util.function.BiConsumer;
 
 public class LoginEncryptionUtils {
     private static final ObjectMapper JSON_MAPPER = new ObjectMapper().disable(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES);
 
     private static boolean HAS_SENT_ENCRYPTION_MESSAGE = false;
 
-    private static boolean validateChainData(JsonNode data) throws Exception {
-        if (data.size() != 3) {
-            return false;
-        }
-
-        ECPublicKey lastKey = null;
-        boolean mojangSigned = false;
-        Iterator<JsonNode> iterator = data.iterator();
-        while (iterator.hasNext()) {
-            JsonNode node = iterator.next();
-            JWSObject jwt = JWSObject.parse(node.asText());
-
-            // x509 cert is expected in every claim
-            URI x5u = jwt.getHeader().getX509CertURL();
-            if (x5u == null) {
-                return false;
-            }
-
-            ECPublicKey expectedKey = EncryptionUtils.generateKey(jwt.getHeader().getX509CertURL().toString());
-            // First key is self-signed
-            if (lastKey == null) {
-                lastKey = expectedKey;
-            } else if (!lastKey.equals(expectedKey)) {
-                return false;
-            }
-
-            if (!EncryptionUtils.verifyJwt(jwt, lastKey)) {
-                return false;
-            }
-
-            if (mojangSigned) {
-                return !iterator.hasNext();
-            }
-
-            if (lastKey.equals(EncryptionUtils.getMojangPublicKey())) {
-                mojangSigned = true;
-            }
-
-            Object payload = JSONValue.parse(jwt.getPayload().toString());
-            Preconditions.checkArgument(payload instanceof JSONObject, "Payload is not an object");
-
-            Object identityPublicKey = ((JSONObject) payload).get("identityPublicKey");
-            Preconditions.checkArgument(identityPublicKey instanceof String, "identityPublicKey node is missing in chain");
-            lastKey = EncryptionUtils.generateKey((String) identityPublicKey);
-        }
-
-        return mojangSigned;
-    }
-
     public static void encryptPlayerConnection(GeyserSession session, LoginPacket loginPacket) {
-        JsonNode certData;
-        try {
-            certData = JSON_MAPPER.readTree(loginPacket.getChainData().toByteArray());
-        } catch (IOException ex) {
-            throw new RuntimeException("Certificate JSON can not be read.");
-        }
-
-        JsonNode certChainData = certData.get("chain");
-        if (certChainData.getNodeType() != JsonNodeType.ARRAY) {
-            throw new RuntimeException("Certificate data is not valid");
-        }
-
-        encryptConnectionWithCert(session, loginPacket.getSkinData().toString(), certChainData);
+        encryptConnectionWithCert(session, loginPacket.getExtra(), loginPacket.getChain());
     }
 
-    private static void encryptConnectionWithCert(GeyserSession session, String clientData, JsonNode certChainData) {
+    private static void encryptConnectionWithCert(GeyserSession session, String clientData, List<String> certChainData) {
         try {
             GeyserImpl geyser = session.getGeyser();
 
-            boolean validChain = validateChainData(certChainData);
+            ChainValidationResult result = EncryptionUtils.validateChain(certChainData);
 
-            geyser.getLogger().debug(String.format("Is player data valid? %s", validChain));
+            geyser.getLogger().debug(String.format("Is player data signed? %s", result.signed()));
 
-            if (!validChain && !session.getGeyser().getConfig().isEnableProxyConnections()) {
+            if (!result.signed() && !session.getGeyser().getConfig().isEnableProxyConnections()) {
                 session.disconnect(GeyserLocale.getLocaleStringLog("geyser.network.remote.invalid_xbox_account"));
                 return;
             }
-            JWSObject jwt = JWSObject.parse(certChainData.get(certChainData.size() - 1).asText());
-            JsonNode payload = JSON_MAPPER.readTree(jwt.getPayload().toBytes());
 
-            if (payload.get("extraData").getNodeType() != JsonNodeType.OBJECT) {
-                throw new RuntimeException("AuthData was not found!");
+            IdentityData extraData = result.identityClaims().extraData;
+            session.setAuthenticationData(new AuthData(extraData.displayName, extraData.identity, extraData.xuid));
+            session.setCertChainData(certChainData);
+
+            PublicKey identityPublicKey = result.identityClaims().parsedIdentityPublicKey();
+
+            byte[] clientDataPayload = EncryptionUtils.verifyClientData(clientData, identityPublicKey);
+            if (clientDataPayload == null) {
+                throw new IllegalStateException("Client data isn't signed by the given chain data");
             }
 
-            JsonNode extraData = payload.get("extraData");
-            session.setAuthenticationData(new AuthData(
-                    extraData.get("displayName").asText(),
-                    UUID.fromString(extraData.get("identity").asText()),
-                    extraData.get("XUID").asText(),
-                    certChainData, clientData
-            ));
-
-            if (payload.get("identityPublicKey").getNodeType() != JsonNodeType.STRING) {
-                throw new RuntimeException("Identity Public Key was not found!");
-            }
-
-            ECPublicKey identityPublicKey = EncryptionUtils.generateKey(payload.get("identityPublicKey").textValue());
-            JWSObject clientJwt = JWSObject.parse(clientData);
-            EncryptionUtils.verifyJwt(clientJwt, identityPublicKey);
-
-            JsonNode clientDataJson = JSON_MAPPER.readTree(clientJwt.getPayload().toBytes());
+            JsonNode clientDataJson = JSON_MAPPER.readTree(clientDataPayload);
             BedrockClientData data = JSON_MAPPER.convertValue(clientDataJson, BedrockClientData.class);
+            data.setOriginalString(clientData);
             session.setClientData(data);
 
-            if (EncryptionUtils.canUseEncryption()) {
-                try {
-                    LoginEncryptionUtils.startEncryptionHandshake(session, identityPublicKey);
-                } catch (Throwable e) {
-                    // An error can be thrown on older Java 8 versions about an invalid key
-                    if (geyser.getConfig().isDebugMode()) {
-                        e.printStackTrace();
-                    }
-
-                    sendEncryptionFailedMessage(geyser);
+            try {
+                startEncryptionHandshake(session, identityPublicKey);
+            } catch (Throwable e) {
+                // An error can be thrown on older Java 8 versions about an invalid key
+                if (geyser.getConfig().isDebugMode()) {
+                    e.printStackTrace();
                 }
-            } else {
+
                 sendEncryptionFailedMessage(geyser);
             }
         } catch (Exception ex) {
@@ -192,17 +107,15 @@ public class LoginEncryptionUtils {
     }
 
     private static void startEncryptionHandshake(GeyserSession session, PublicKey key) throws Exception {
-        KeyPairGenerator generator = KeyPairGenerator.getInstance("EC");
-        generator.initialize(new ECGenParameterSpec("secp384r1"));
-        KeyPair serverKeyPair = generator.generateKeyPair();
-
+        KeyPair serverKeyPair = EncryptionUtils.createKeyPair();
         byte[] token = EncryptionUtils.generateRandomToken();
-        SecretKey encryptionKey = EncryptionUtils.getSecretKey(serverKeyPair.getPrivate(), key, token);
-        session.getUpstream().getSession().enableEncryption(encryptionKey);
 
         ServerToClientHandshakePacket packet = new ServerToClientHandshakePacket();
-        packet.setJwt(EncryptionUtils.createHandshakeJwt(serverKeyPair, token).serialize());
+        packet.setJwt(EncryptionUtils.createHandshakeJwt(serverKeyPair, token));
         session.sendUpstreamPacketImmediately(packet);
+
+        SecretKey encryptionKey = EncryptionUtils.getSecretKey(serverKeyPair.getPrivate(), key, token);
+        session.getUpstream().getSession().enableEncryption(encryptionKey);
     }
 
     private static void sendEncryptionFailedMessage(GeyserImpl geyser) {
@@ -222,43 +135,21 @@ public class LoginEncryptionUtils {
         // Set DoDaylightCycle to false so the time doesn't accelerate while we're here
         session.setDaylightCycle(false);
 
-        GeyserConfiguration config = session.getGeyser().getConfig();
-        boolean isPasswordAuthEnabled = config.getRemote().isPasswordAuthentication();
-
         session.sendForm(
                 SimpleForm.builder()
-                        .translator(GeyserLocale::getPlayerLocaleString, session.getLocale())
+                        .translator(GeyserLocale::getPlayerLocaleString, session.locale())
                         .title("geyser.auth.login.form.notice.title")
                         .content("geyser.auth.login.form.notice.desc")
-                        .optionalButton("geyser.auth.login.form.notice.btn_login.mojang", isPasswordAuthEnabled)
                         .button("geyser.auth.login.form.notice.btn_login.microsoft")
                         .button("geyser.auth.login.form.notice.btn_disconnect")
-                        .responseHandler((form, responseData) -> {
-                            SimpleFormResponse response = form.parseResponse(responseData);
-                            if (!response.isCorrect()) {
-                                buildAndShowLoginWindow(session);
-                                return;
-                            }
-
-                            if (isPasswordAuthEnabled && response.getClickedButtonId() == 0) {
-                                session.setMicrosoftAccount(false);
-                                buildAndShowLoginDetailsWindow(session);
-                                return;
-                            }
-
-                            if (isPasswordAuthEnabled && response.getClickedButtonId() == 1) {
-                                session.setMicrosoftAccount(true);
-                                buildAndShowMicrosoftAuthenticationWindow(session);
-                                return;
-                            }
-
-                            if (response.getClickedButtonId() == 0) {
-                                // Just show the OAuth code
+                        .closedOrInvalidResultHandler(() -> buildAndShowLoginWindow(session))
+                        .validResultHandler((response) -> {
+                            if (response.clickedButtonId() == 0) {
                                 session.authenticateWithMicrosoftCode();
                                 return;
                             }
 
-                            session.disconnect(GeyserLocale.getPlayerLocaleString("geyser.auth.login.form.disconnect", session.getLocale()));
+                            session.disconnect(GeyserLocale.getPlayerLocaleString("geyser.auth.login.form.disconnect", session.locale()));
                         }));
     }
 
@@ -266,95 +157,55 @@ public class LoginEncryptionUtils {
      * Build a window that explains the user's credentials will be saved to the system.
      */
     public static void buildAndShowConsentWindow(GeyserSession session) {
-        String locale = session.getLocale();
+        String locale = session.locale();
+
         session.sendForm(
                 SimpleForm.builder()
+                        .translator(LoginEncryptionUtils::translate, locale)
                         .title("%gui.signIn")
-                        .content(GeyserLocale.getPlayerLocaleString("geyser.auth.login.save_token.warning", locale) +
-                                "\n\n" +
-                                GeyserLocale.getPlayerLocaleString("geyser.auth.login.save_token.proceed", locale))
+                        .content("""
+                                geyser.auth.login.save_token.warning
+
+                                geyser.auth.login.save_token.proceed""")
                         .button("%gui.ok")
                         .button("%gui.decline")
-                        .responseHandler((form, responseData) -> {
-                            SimpleFormResponse response = form.parseResponse(responseData);
-                            if (response.isCorrect() && response.getClickedButtonId() == 0) {
-                                session.authenticateWithMicrosoftCode(true);
-                            } else {
-                                session.disconnect("%disconnect.quitting");
-                            }
-                        }));
+                        .resultHandler(authenticateOrKickHandler(session))
+        );
     }
 
     public static void buildAndShowTokenExpiredWindow(GeyserSession session) {
-        String locale = session.getLocale();
+        String locale = session.locale();
+
         session.sendForm(
                 SimpleForm.builder()
-                        .title(GeyserLocale.getPlayerLocaleString("geyser.auth.login.form.expired", locale))
-                        .content(GeyserLocale.getPlayerLocaleString("geyser.auth.login.save_token.expired", locale) +
-                                "\n\n" +
-                                GeyserLocale.getPlayerLocaleString("geyser.auth.login.save_token.proceed", locale))
+                        .translator(LoginEncryptionUtils::translate, locale)
+                        .title("geyser.auth.login.form.expired")
+                        .content("""
+                                geyser.auth.login.save_token.expired
+
+                                geyser.auth.login.save_token.proceed""")
                         .button("%gui.ok")
-                        .responseHandler((form, responseData) -> {
-                            SimpleFormResponse response = form.parseResponse(responseData);
-                            if (response.isCorrect()) {
-                                session.authenticateWithMicrosoftCode(true);
-                            } else {
-                                session.disconnect("%disconnect.quitting");
-                            }
-                        }));
+                        .resultHandler(authenticateOrKickHandler(session))
+        );
     }
 
-    public static void buildAndShowLoginDetailsWindow(GeyserSession session) {
-        session.sendForm(
-                CustomForm.builder()
-                        .translator(GeyserLocale::getPlayerLocaleString, session.getLocale())
-                        .title("geyser.auth.login.form.details.title")
-                        .label("geyser.auth.login.form.details.desc")
-                        .input("geyser.auth.login.form.details.email", "account@geysermc.org", "")
-                        .input("geyser.auth.login.form.details.pass", "123456", "")
-                        .responseHandler((form, responseData) -> {
-                            CustomFormResponse response = form.parseResponse(responseData);
-                            if (!response.isCorrect()) {
-                                buildAndShowLoginDetailsWindow(session);
-                                return;
-                            }
-
-                            session.authenticate(response.next(), response.next());
-                        }));
-    }
-
-    /**
-     * Prompts the user between either OAuth code login or manual password authentication
-     */
-    public static void buildAndShowMicrosoftAuthenticationWindow(GeyserSession session) {
-        session.sendForm(
-                SimpleForm.builder()
-                        .translator(GeyserLocale::getPlayerLocaleString, session.getLocale())
-                        .title("geyser.auth.login.form.notice.btn_login.microsoft")
-                        .button("geyser.auth.login.method.browser")
-                        .button("geyser.auth.login.method.password")
-                        .button("geyser.auth.login.form.notice.btn_disconnect")
-                        .responseHandler((form, responseData) -> {
-                            SimpleFormResponse response = form.parseResponse(responseData);
-                            if (!response.isCorrect()) {
-                                buildAndShowLoginWindow(session);
-                                return;
-                            }
-
-                            if (response.getClickedButtonId() == 0) {
-                                session.authenticateWithMicrosoftCode();
-                            } else if (response.getClickedButtonId() == 1) {
-                                buildAndShowLoginDetailsWindow(session);
-                            } else {
-                                session.disconnect(GeyserLocale.getPlayerLocaleString("geyser.auth.login.form.disconnect", session.getLocale()));
-                            }
-                        }));
+    private static BiConsumer<SimpleForm, FormResponseResult<SimpleFormResponse>> authenticateOrKickHandler(GeyserSession session) {
+        return (form, genericResult) -> {
+            if (genericResult instanceof ValidFormResponseResult<SimpleFormResponse> result &&
+                    result.response().clickedButtonId() == 0) {
+                session.authenticateWithMicrosoftCode(true);
+            } else {
+                session.disconnect("%disconnect.quitting");
+            }
+        };
     }
 
     /**
      * Shows the code that a user must input into their browser
      */
     public static void buildAndShowMicrosoftCodeWindow(GeyserSession session, MsaAuthenticationService.MsCodeResponse msCode) {
+        String locale = session.locale();
+
         StringBuilder message = new StringBuilder("%xbox.signin.website\n")
                 .append(ChatColor.AQUA)
                 .append("%xbox.signin.url")
@@ -366,25 +217,47 @@ public class LoginEncryptionUtils {
         if (timeout != 0) {
             message.append("\n\n")
                     .append(ChatColor.RESET)
-                    .append(GeyserLocale.getPlayerLocaleString("geyser.auth.login.timeout", session.getLocale(), String.valueOf(timeout)));
+                    .append(GeyserLocale.getPlayerLocaleString("geyser.auth.login.timeout", session.locale(), String.valueOf(timeout)));
         }
+
         session.sendForm(
                 ModalForm.builder()
                         .title("%xbox.signin")
                         .content(message.toString())
                         .button1("%gui.done")
                         .button2("%menu.disconnect")
-                        .responseHandler((form, responseData) -> {
-                            ModalFormResponse response = form.parseResponse(responseData);
-                            if (!response.isCorrect()) {
-                                buildAndShowMicrosoftAuthenticationWindow(session);
-                                return;
-                            }
-
-                            if (response.getClickedButtonId() == 1) {
-                                session.disconnect(GeyserLocale.getPlayerLocaleString("geyser.auth.login.form.disconnect", session.getLocale()));
+                        .closedOrInvalidResultHandler(() -> buildAndShowLoginWindow(session))
+                        .validResultHandler((response) -> {
+                            if (response.clickedButtonId() == 1) {
+                                session.disconnect(GeyserLocale.getPlayerLocaleString("geyser.auth.login.form.disconnect", locale));
                             }
                         })
         );
+    }
+
+    /*
+    This checks per line if there is something to be translated, and it skips Bedrock translation keys (%)
+     */
+    private static String translate(String key, String locale) {
+        StringBuilder newValue = new StringBuilder();
+        int previousIndex = 0;
+        while (previousIndex < key.length()) {
+            int nextIndex = key.indexOf('\n', previousIndex);
+            int endIndex = nextIndex == -1 ? key.length() : nextIndex;
+
+            // if there is more to this line than just a new line char
+            if (endIndex - previousIndex > 1) {
+                String substring = key.substring(previousIndex, endIndex);
+                if (key.charAt(previousIndex) != '%') {
+                    newValue.append(GeyserLocale.getPlayerLocaleString(substring, locale));
+                } else {
+                    newValue.append(substring);
+                }
+            }
+            newValue.append('\n');
+
+            previousIndex = endIndex + 1;
+        }
+        return newValue.toString();
     }
 }

@@ -25,24 +25,24 @@
 
 package org.geysermc.geyser.session.cache;
 
-import com.nukkitx.math.GenericMath;
-import com.nukkitx.math.vector.Vector2d;
-import com.nukkitx.math.vector.Vector3f;
-import com.nukkitx.protocol.bedrock.data.LevelEventType;
-import com.nukkitx.protocol.bedrock.packet.LevelEventPacket;
+import org.checkerframework.checker.nullness.qual.NonNull;
+import org.cloudburstmc.math.GenericMath;
+import org.cloudburstmc.math.vector.Vector2d;
+import org.cloudburstmc.math.vector.Vector3f;
+import org.cloudburstmc.protocol.bedrock.data.LevelEvent;
+import org.cloudburstmc.protocol.bedrock.data.LevelEventType;
+import org.cloudburstmc.protocol.bedrock.packet.LevelEventPacket;
 import lombok.Getter;
 import lombok.Setter;
 import org.geysermc.geyser.entity.EntityDefinitions;
 import org.geysermc.geyser.entity.type.player.PlayerEntity;
 import org.geysermc.geyser.session.GeyserSession;
 
-import javax.annotation.Nonnull;
-
 public class WorldBorder {
     private static final double DEFAULT_WORLD_BORDER_SIZE = 5.9999968E7D;
 
     @Setter
-    private @Nonnull Vector2d center = Vector2d.ZERO;
+    private @NonNull Vector2d center = Vector2d.ZERO;
     /**
      * The diameter in blocks of the world border before it got changed or similar to newDiameter if not changed.
      */
@@ -139,6 +139,18 @@ public class WorldBorder {
         return position.getX() > minX && position.getX() < maxX && position.getZ() > minZ && position.getZ() < maxZ;
     }
 
+    private static final int CLOSE_TO_BORDER = 5;
+
+    /**
+     * @return if the player is close to the border boundaries. Used to always indicate a border even if there is no
+     * warning blocks set.
+     */
+    public boolean isCloseToBorderBoundaries() {
+        Vector3f position = session.getPlayerEntity().getPosition();
+        return !(position.getX() > minX + CLOSE_TO_BORDER && position.getX() < maxX - CLOSE_TO_BORDER
+                && position.getZ() > minZ + CLOSE_TO_BORDER && position.getZ() < maxZ - CLOSE_TO_BORDER);
+    }
+
     /**
      * Confirms that the entity is within world border boundaries when they move.
      * Otherwise, if {@code adjustPosition} is true, this function will push the player back.
@@ -230,7 +242,7 @@ public class WorldBorder {
         }
     }
 
-    private static final LevelEventType WORLD_BORDER_PARTICLE = LevelEventType.PARTICLE_DENY_BLOCK;
+    private static final LevelEventType WORLD_BORDER_PARTICLE = LevelEvent.PARTICLE_DENY_BLOCK;
 
     /**
      * Draws a wall of particles where the world border resides
@@ -246,16 +258,16 @@ public class WorldBorder {
         float particlePosY = entityPosition.getY();
         float particlePosZ = entityPosition.getZ();
 
-        if (entityPosition.getX() > warningMaxX) {
+        if (entityPosition.getX() > Math.min(warningMaxX, maxX - CLOSE_TO_BORDER)) {
             drawWall(Vector3f.from(maxX, particlePosY, particlePosZ), true);
         }
-        if (entityPosition.getX() < warningMinX) {
+        if (entityPosition.getX() < Math.max(warningMinX, minX + CLOSE_TO_BORDER)) {
             drawWall(Vector3f.from(minX, particlePosY, particlePosZ), true);
         }
-        if (entityPosition.getZ() > warningMaxZ) {
+        if (entityPosition.getZ() > Math.min(warningMaxZ, maxZ - CLOSE_TO_BORDER)) {
             drawWall(Vector3f.from(particlePosX, particlePosY, maxZ), false);
         }
-        if (entityPosition.getZ() < warningMinZ) {
+        if (entityPosition.getZ() < Math.max(warningMinZ, minZ + CLOSE_TO_BORDER)) {
             drawWall(Vector3f.from(particlePosX, particlePosY, minZ), false);
         }
     }

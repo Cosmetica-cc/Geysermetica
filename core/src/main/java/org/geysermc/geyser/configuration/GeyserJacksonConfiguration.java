@@ -34,17 +34,19 @@ import com.fasterxml.jackson.databind.JsonDeserializer;
 import com.fasterxml.jackson.databind.annotation.JsonDeserialize;
 import lombok.Getter;
 import lombok.Setter;
+import org.checkerframework.checker.nullness.qual.NonNull;
 import org.geysermc.geyser.GeyserImpl;
-import org.geysermc.geyser.session.auth.AuthType;
-import org.geysermc.geyser.text.AsteriskSerializer;
+import org.geysermc.geyser.api.network.AuthType;
 import org.geysermc.geyser.network.CIDRMatcher;
+import org.geysermc.geyser.text.AsteriskSerializer;
 import org.geysermc.geyser.text.GeyserLocale;
+import org.geysermc.geyser.util.WebUtils;
 
 import java.io.IOException;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
-import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
 
@@ -53,9 +55,6 @@ import java.util.stream.Collectors;
 @SuppressWarnings("FieldMayBeFinal") // Jackson requires that the fields are not final
 public abstract class GeyserJacksonConfiguration implements GeyserConfiguration {
 
-    /**
-     * If the config was originally 'auto' before the values changed
-     */
     @Setter
     private boolean autoconfiguredRemote = false;
 
@@ -70,8 +69,6 @@ public abstract class GeyserJacksonConfiguration implements GeyserConfiguration 
 
     public abstract Path getFloodgateKeyPath();
 
-    private Map<String, UserAuthenticationInfo> userAuths;
-
     @JsonProperty("command-suggestions")
     private boolean commandSuggestions = true;
 
@@ -80,9 +77,6 @@ public abstract class GeyserJacksonConfiguration implements GeyserConfiguration 
 
     @JsonProperty("passthrough-player-counts")
     private boolean isPassthroughPlayerCounts = false;
-
-    @JsonProperty("passthrough-protocol-name")
-    private boolean isPassthroughProtocolName = false;
 
     @JsonProperty("legacy-ping-passthrough")
     private boolean isLegacyPingPassthrough = false;
@@ -100,7 +94,7 @@ public abstract class GeyserJacksonConfiguration implements GeyserConfiguration 
     private boolean debugMode = false;
 
     @JsonProperty("allow-third-party-capes")
-    private boolean allowThirdPartyCapes = true;
+    private boolean allowThirdPartyCapes = false;
 
     @JsonProperty("show-cooldown")
     private String showCooldown = "title";
@@ -110,9 +104,6 @@ public abstract class GeyserJacksonConfiguration implements GeyserConfiguration 
 
     @JsonProperty("disable-bedrock-scaffolding")
     private boolean disableBedrockScaffolding = false;
-
-    @JsonProperty("always-quick-change-armor")
-    private boolean alwaysQuickChangeArmor = false;
 
     @JsonDeserialize(using = EmoteOffhandWorkaroundOption.Deserializer.class)
     @JsonProperty("emote-offhand-workaround")
@@ -130,6 +121,12 @@ public abstract class GeyserJacksonConfiguration implements GeyserConfiguration 
     @JsonProperty("allow-custom-skulls")
     private boolean allowCustomSkulls = true;
 
+    @JsonProperty("max-visible-custom-skulls")
+    private int maxVisibleCustomSkulls = 128;
+
+    @JsonProperty("custom-skull-render-distance")
+    private int customSkullRenderDistance = 32;
+
     @JsonProperty("add-non-bedrock-items")
     private boolean addNonBedrockItems = true;
 
@@ -142,28 +139,77 @@ public abstract class GeyserJacksonConfiguration implements GeyserConfiguration 
     @JsonProperty("xbox-achievements-enabled")
     private boolean xboxAchievementsEnabled = false;
 
+    @JsonProperty("log-player-ip-addresses")
+    private boolean logPlayerIpAddresses = true;
+
+    @JsonProperty("notify-on-new-bedrock-update")
+    private boolean notifyOnNewBedrockUpdate = true;
+
+    @JsonProperty("unusable-space-block")
+    private String unusableSpaceBlock = "minecraft:barrier";
+
     private MetricsInfo metrics = new MetricsInfo();
 
     @JsonProperty("pending-authentication-timeout")
     private int pendingAuthenticationTimeout = 120;
 
-    @Getter
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class BedrockConfiguration implements IBedrockConfiguration {
         @AsteriskSerializer.Asterisk(isIp = true)
+        @JsonProperty("address")
+        @Setter
         private String address = "0.0.0.0";
 
+        @Override
+        public @NonNull String address() {
+            return address;
+        }
+
         @Setter
+        @JsonProperty("port")
         private int port = 19132;
 
+        @Override
+        public int port() {
+            return port;
+        }
+
+        @Setter
+        @JsonProperty("broadcast-port")
+        private int broadcastPort = 0;
+
+        @Override
+        public int broadcastPort() {
+            return broadcastPort;
+        }
+
+        @Getter
         @JsonProperty("clone-remote-port")
         private boolean cloneRemotePort = false;
 
+        @JsonProperty("motd1")
         private String motd1 = "GeyserMC";
+
+        @Override
+        public String primaryMotd() {
+            return motd1;
+        }
+
+        @JsonProperty("motd2")
         private String motd2 = "Geyser";
+
+        @Override
+        public String secondaryMotd() {
+            return motd2;
+        }
 
         @JsonProperty("server-name")
         private String serverName = GeyserImpl.NAME;
+
+        @Override
+        public String serverName() {
+            return serverName;
+        }
 
         @JsonProperty("compression-level")
         private int compressionLevel = 6;
@@ -172,9 +218,11 @@ public abstract class GeyserJacksonConfiguration implements GeyserConfiguration 
             return Math.max(-1, Math.min(compressionLevel, 9));
         }
 
+        @Getter
         @JsonProperty("enable-proxy-protocol")
         private boolean enableProxyProtocol = false;
 
+        @Getter
         @JsonProperty("proxy-protocol-whitelisted-ips")
         private List<String> proxyProtocolWhitelistedIPs = Collections.emptyList();
 
@@ -187,7 +235,18 @@ public abstract class GeyserJacksonConfiguration implements GeyserConfiguration 
             List<CIDRMatcher> matchers = this.whitelistedIPsMatchers;
             if (matchers == null) {
                 synchronized (this) {
-                    this.whitelistedIPsMatchers = matchers = proxyProtocolWhitelistedIPs.stream()
+                    // Check if proxyProtocolWhitelistedIPs contains URLs we need to fetch and parse by line
+                    List<String> whitelistedCIDRs = new ArrayList<>();
+                    for (String ip: proxyProtocolWhitelistedIPs) {
+                        if (!ip.startsWith("http")) {
+                            whitelistedCIDRs.add(ip);
+                            continue; 
+                        }
+
+                        WebUtils.getLineStream(ip).forEach(whitelistedCIDRs::add);
+                    }
+
+                    this.whitelistedIPsMatchers = matchers = whitelistedCIDRs.stream()
                             .map(CIDRMatcher::new)
                             .collect(Collectors.toList());
                 }
@@ -196,43 +255,50 @@ public abstract class GeyserJacksonConfiguration implements GeyserConfiguration 
         }
     }
 
-    @Getter
     @JsonIgnoreProperties(ignoreUnknown = true)
     public static class RemoteConfiguration implements IRemoteConfiguration {
         @Setter
         @AsteriskSerializer.Asterisk(isIp = true)
+        @JsonProperty("address")
         private String address = "auto";
+
+        @Override
+        public String address() {
+            return address;
+        }
 
         @JsonDeserialize(using = PortDeserializer.class)
         @Setter
+        @JsonProperty("port")
         private int port = 25565;
 
+        @Override
+        public int port() {
+            return port;
+        }
+
         @Setter
-        @JsonDeserialize(using = AuthType.Deserializer.class)
+        @JsonDeserialize(using = AuthTypeDeserializer.class)
         @JsonProperty("auth-type")
         private AuthType authType = AuthType.ONLINE;
 
-        @JsonProperty("allow-password-authentication")
-        private boolean passwordAuthentication = true;
+        @Override
+        public @NonNull AuthType authType() {
+            return authType;
+        }
 
+        @Override
+        public boolean resolveSrv() {
+            return false;
+        }
+
+        @Getter
         @JsonProperty("use-proxy-protocol")
         private boolean useProxyProtocol = false;
 
+        @Getter
         @JsonProperty("forward-hostname")
         private boolean forwardHost = false;
-    }
-
-    @Getter
-    @JsonIgnoreProperties(ignoreUnknown = true) // DO NOT REMOVE THIS! Otherwise, after we remove microsoft-account configs will not load
-    public static class UserAuthenticationInfo implements IUserAuthenticationInfo {
-        @AsteriskSerializer.Asterisk()
-        private String email;
-
-        @AsteriskSerializer.Asterisk()
-        private String password;
-
-        @JsonProperty("microsoft-account")
-        private boolean microsoftAccount = false;
     }
 
     @Getter
@@ -240,8 +306,21 @@ public abstract class GeyserJacksonConfiguration implements GeyserConfiguration 
     public static class MetricsInfo implements IMetricsInfo {
         private boolean enabled = true;
 
+        @JsonDeserialize(using = MetricsIdDeserializer.class)
         @JsonProperty("uuid")
         private String uniqueId = UUID.randomUUID().toString();
+
+        private static class MetricsIdDeserializer extends JsonDeserializer<String> {
+            @Override
+            public String deserialize(JsonParser p, DeserializationContext ctxt) throws IOException {
+                String uuid = p.getValueAsString();
+                if ("generateduuid".equals(uuid)) {
+                    // Compensate for configs not copied from the jar
+                    return UUID.randomUUID().toString();
+                }
+                return uuid;
+            }
+        }
     }
 
     @JsonProperty("scoreboard-packet-threshold")
@@ -255,6 +334,9 @@ public abstract class GeyserJacksonConfiguration implements GeyserConfiguration 
 
     @JsonProperty("use-direct-connection")
     private boolean useDirectConnection = true;
+
+    @JsonProperty("disable-compression")
+    private boolean isDisableCompression = true;
 
     @JsonProperty("config-version")
     private int configVersion = 0;
@@ -272,6 +354,13 @@ public abstract class GeyserJacksonConfiguration implements GeyserConfiguration 
                 System.err.println(GeyserLocale.getLocaleStringLog("geyser.bootstrap.config.invalid_port"));
                 return 25565;
             }
+        }
+    }
+
+    public static class AuthTypeDeserializer extends JsonDeserializer<AuthType> {
+        @Override
+        public AuthType deserialize(JsonParser p, DeserializationContext ctxt) throws IOException {
+            return AuthType.getByName(p.getValueAsString());
         }
     }
 }

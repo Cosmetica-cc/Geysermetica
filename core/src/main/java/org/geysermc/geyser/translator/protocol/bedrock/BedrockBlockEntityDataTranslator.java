@@ -25,14 +25,16 @@
 
 package org.geysermc.geyser.translator.protocol.bedrock;
 
-import com.github.steveice10.mc.protocol.data.game.entity.metadata.Position;
-import com.github.steveice10.mc.protocol.packet.ingame.serverbound.inventory.ServerboundSetJigsawBlockPacket;
-import com.github.steveice10.mc.protocol.packet.ingame.serverbound.level.ServerboundSignUpdatePacket;
-import com.nukkitx.nbt.NbtMap;
-import com.nukkitx.protocol.bedrock.packet.BlockEntityDataPacket;
+import org.geysermc.geyser.util.MinecraftKey;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.inventory.ServerboundSetJigsawBlockPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.level.ServerboundSignUpdatePacket;
+import org.cloudburstmc.math.vector.Vector3i;
+import org.cloudburstmc.nbt.NbtMap;
+import org.cloudburstmc.protocol.bedrock.packet.BlockEntityDataPacket;
 import org.geysermc.geyser.session.GeyserSession;
 import org.geysermc.geyser.translator.protocol.PacketTranslator;
 import org.geysermc.geyser.translator.protocol.Translator;
+import org.geysermc.geyser.translator.text.MessageTranslator;
 import org.geysermc.geyser.util.SignUtils;
 
 @Translator(packet = BlockEntityDataPacket.class)
@@ -42,16 +44,14 @@ public class BedrockBlockEntityDataTranslator extends PacketTranslator<BlockEnti
     public void translate(GeyserSession session, BlockEntityDataPacket packet) {
         NbtMap tag = packet.getData();
         String id = tag.getString("id");
-        if (id.equals("Sign")) {
-            String text = tag.getString("Text");
-            // This is the reason why this all works - Bedrock sends packets every time you update the sign, Java only wants the final packet
-            // But Bedrock sends one final packet when you're done editing the sign, which should be equal to the last message since there's no edits
-            // So if the latest update does not match the last cached update then it's still being edited
-            if (!text.equals(session.getLastSignMessage())) {
-                session.setLastSignMessage(text);
-                return;
-            }
-            // Otherwise the two messages are identical and we can get to work deconstructing
+        if (id.endsWith("Sign")) {
+            // Hanging signs are narrower
+            int widthMax = SignUtils.getSignWidthMax(id.startsWith("Hanging"));
+
+            String text = MessageTranslator.convertToPlainText(
+                tag.getCompound(session.getWorldCache().isEditingSignOnFront() ? "FrontText" : "BackText").getString("Text"));
+            // Note: as of 1.18.30, only one packet is sent from Bedrock when the sign is finished.
+            // Previous versions did not have this behavior.
             StringBuilder newMessage = new StringBuilder();
             // While Bedrock's sign lines are one string, Java's is an array of each line
             // (Initialized all with empty strings because it complains about null)
@@ -63,10 +63,11 @@ public class BedrockBlockEntityDataTranslator extends PacketTranslator<BlockEnti
             // This converts the message into the array'd message Java wants
             for (char character : text.toCharArray()) {
                 widthCount += SignUtils.getCharacterWidth(character);
+
                 // If we get a return in Bedrock, or go over the character width max, that signals to use the next line.
-                if (character == '\n' || widthCount > SignUtils.JAVA_CHARACTER_WIDTH_MAX) {
+                if (character == '\n' || widthCount > widthMax) {
                     // We need to apply some more logic if we went over the character width max
-                    boolean wentOverMax = widthCount > SignUtils.JAVA_CHARACTER_WIDTH_MAX && character != '\n';
+                    boolean wentOverMax = widthCount > widthMax && character != '\n';
                     widthCount = 0;
                     // Saves if we're moving a word to the next line
                     String word = null;
@@ -106,24 +107,23 @@ public class BedrockBlockEntityDataTranslator extends PacketTranslator<BlockEnti
             }
             // Put the final line on since it isn't done in the for loop
             if (iterator < lines.length) lines[iterator] = newMessage.toString();
-            Position pos = new Position(tag.getInt("x"), tag.getInt("y"), tag.getInt("z"));
-            ServerboundSignUpdatePacket signUpdatePacket = new ServerboundSignUpdatePacket(pos, lines);
-            session.sendDownstreamPacket(signUpdatePacket);
-
-            // We set the sign text cached in the session to null to indicate there is no work-in-progress sign
-            session.setLastSignMessage(null);
+            Vector3i pos = Vector3i.from(tag.getInt("x"), tag.getInt("y"), tag.getInt("z"));
+            ServerboundSignUpdatePacket signUpdatePacket = new ServerboundSignUpdatePacket(pos, lines, session.getWorldCache().isEditingSignOnFront());
+            session.sendDownstreamGamePacket(signUpdatePacket);
 
         } else if (id.equals("JigsawBlock")) {
             // Client has just sent a jigsaw block update
-            Position pos = new Position(tag.getInt("x"), tag.getInt("y"), tag.getInt("z"));
+            Vector3i pos = Vector3i.from(tag.getInt("x"), tag.getInt("y"), tag.getInt("z"));
             String name = tag.getString("name");
             String target = tag.getString("target");
             String pool = tag.getString("target_pool");
             String finalState = tag.getString("final_state");
             String joint = tag.getString("joint");
-            ServerboundSetJigsawBlockPacket jigsawPacket = new ServerboundSetJigsawBlockPacket(pos, name, target, pool,
-                    finalState, joint);
-            session.sendDownstreamPacket(jigsawPacket);
+            // last two parameters are priority values that Bedrock doesn't have (yet?)
+            ServerboundSetJigsawBlockPacket jigsawPacket = new ServerboundSetJigsawBlockPacket(pos,
+                    MinecraftKey.key(name), MinecraftKey.key(target), MinecraftKey.key(pool),
+                    finalState, joint, 0, 0);
+            session.sendDownstreamGamePacket(jigsawPacket);
         }
 
     }

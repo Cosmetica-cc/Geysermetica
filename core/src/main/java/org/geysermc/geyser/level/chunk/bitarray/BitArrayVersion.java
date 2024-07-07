@@ -25,6 +25,7 @@
 
 package org.geysermc.geyser.level.chunk.bitarray;
 
+import org.checkerframework.checker.nullness.qual.Nullable;
 import org.geysermc.geyser.util.MathUtils;
 
 public enum BitArrayVersion {
@@ -61,7 +62,7 @@ public enum BitArrayVersion {
         throw new IllegalArgumentException("Invalid palette version: " + version);
     }
 
-    public static BitArrayVersion forBitsCeil(int bits) {
+    public static @Nullable BitArrayVersion forBitsCeil(int bits) {
         for (int i = VALUES.length - 1; i >= 0; i--)  {
             BitArrayVersion version = VALUES[i];
             if (version.bits >= bits)   {
@@ -79,10 +80,6 @@ public enum BitArrayVersion {
         return maxEntryValue;
     }
 
-    public int getWordsForSize(int size) {
-        return MathUtils.ceil((float) size / entriesPerWord);
-    }
-
     public BitArrayVersion next() {
         return next;
     }
@@ -96,7 +93,7 @@ public enum BitArrayVersion {
             // Padded palettes aren't able to use bitwise operations due to their padding.
             return new PaddedBitArray(this, size, words);
         } else if (this == V0) {
-            return new SingletonBitArray();
+            return SingletonBitArray.INSTANCE;
         } else {
             return new Pow2BitArray(this, size, words);
         }

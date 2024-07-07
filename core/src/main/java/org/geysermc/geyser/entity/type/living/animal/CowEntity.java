@@ -25,16 +25,20 @@
 
 package org.geysermc.geyser.entity.type.living.animal;
 
-import com.nukkitx.math.vector.Vector3f;
-import com.nukkitx.protocol.bedrock.data.SoundEvent;
-import com.nukkitx.protocol.bedrock.data.entity.EntityFlag;
+import org.checkerframework.checker.nullness.qual.NonNull;
+import org.checkerframework.checker.nullness.qual.Nullable;
+import org.cloudburstmc.math.vector.Vector3f;
+import org.cloudburstmc.protocol.bedrock.data.SoundEvent;
+import org.cloudburstmc.protocol.bedrock.data.entity.EntityFlag;
 import org.geysermc.geyser.entity.EntityDefinition;
 import org.geysermc.geyser.inventory.GeyserItemStack;
+import org.geysermc.geyser.item.Items;
 import org.geysermc.geyser.session.GeyserSession;
+import org.geysermc.geyser.session.cache.tags.ItemTag;
 import org.geysermc.geyser.util.InteractionResult;
 import org.geysermc.geyser.util.InteractiveTag;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.player.Hand;
 
-import javax.annotation.Nonnull;
 import java.util.UUID;
 
 public class CowEntity extends AnimalEntity {
@@ -42,24 +46,30 @@ public class CowEntity extends AnimalEntity {
         super(session, entityId, geyserId, uuid, definition, position, motion, yaw, pitch, headYaw);
     }
 
-    @Nonnull
+    @NonNull
     @Override
-    protected InteractiveTag testMobInteraction(@Nonnull GeyserItemStack itemInHand) {
-        if (getFlag(EntityFlag.BABY) || !itemInHand.getMapping(session).getJavaIdentifier().equals("minecraft:bucket")) {
-            return super.testMobInteraction(itemInHand);
+    protected InteractiveTag testMobInteraction(@NonNull Hand hand, @NonNull GeyserItemStack itemInHand) {
+        if (getFlag(EntityFlag.BABY) || itemInHand.asItem() != Items.BUCKET) {
+            return super.testMobInteraction(hand, itemInHand);
         }
 
         return InteractiveTag.MILK;
     }
 
-    @Nonnull
+    @NonNull
     @Override
-    protected InteractionResult mobInteract(@Nonnull GeyserItemStack itemInHand) {
-        if (getFlag(EntityFlag.BABY) || !itemInHand.getMapping(session).getJavaIdentifier().equals("minecraft:bucket")) {
-            return super.mobInteract(itemInHand);
+    protected InteractionResult mobInteract(@NonNull Hand hand, @NonNull GeyserItemStack itemInHand) {
+        if (getFlag(EntityFlag.BABY) || itemInHand.asItem() != Items.BUCKET) {
+            return super.mobInteract(hand, itemInHand);
         }
 
         session.playSoundEvent(SoundEvent.MILK, position);
         return InteractionResult.SUCCESS;
+    }
+
+    @Override
+    @Nullable
+    protected ItemTag getFoodTag() {
+        return ItemTag.COW_FOOD;
     }
 }

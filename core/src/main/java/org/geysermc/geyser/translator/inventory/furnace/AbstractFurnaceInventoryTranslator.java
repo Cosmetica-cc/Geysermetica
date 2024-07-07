@@ -25,25 +25,27 @@
 
 package org.geysermc.geyser.translator.inventory.furnace;
 
-import com.nukkitx.protocol.bedrock.data.inventory.ContainerSlotType;
-import com.nukkitx.protocol.bedrock.data.inventory.ContainerType;
-import com.nukkitx.protocol.bedrock.packet.ContainerSetDataPacket;
-import org.geysermc.geyser.inventory.Inventory;
-import org.geysermc.geyser.session.GeyserSession;
+import org.cloudburstmc.protocol.bedrock.data.inventory.ContainerSlotType;
+import org.cloudburstmc.protocol.bedrock.data.inventory.ContainerType;
+import org.cloudburstmc.protocol.bedrock.packet.ContainerSetDataPacket;
 import org.geysermc.geyser.inventory.BedrockContainerSlot;
+import org.geysermc.geyser.inventory.Inventory;
 import org.geysermc.geyser.inventory.SlotType;
-import org.geysermc.geyser.translator.inventory.AbstractBlockInventoryTranslator;
 import org.geysermc.geyser.inventory.updater.ContainerInventoryUpdater;
+import org.geysermc.geyser.level.block.property.Properties;
+import org.geysermc.geyser.level.block.type.Block;
+import org.geysermc.geyser.session.GeyserSession;
+import org.geysermc.geyser.translator.inventory.AbstractBlockInventoryTranslator;
 
 public abstract class AbstractFurnaceInventoryTranslator extends AbstractBlockInventoryTranslator {
-    AbstractFurnaceInventoryTranslator(String javaBlockIdentifier, ContainerType containerType) {
-        super(3, javaBlockIdentifier, containerType, ContainerInventoryUpdater.INSTANCE);
+    AbstractFurnaceInventoryTranslator(Block javaBlock, ContainerType containerType) {
+        super(3, javaBlock.defaultBlockState().withValue(Properties.LIT, false), containerType, ContainerInventoryUpdater.INSTANCE);
     }
 
     @Override
     public void updateProperty(GeyserSession session, Inventory inventory, int key, int value) {
         ContainerSetDataPacket dataPacket = new ContainerSetDataPacket();
-        dataPacket.setWindowId((byte) inventory.getId());
+        dataPacket.setWindowId((byte) inventory.getBedrockId());
         switch (key) {
             case 0:
                 dataPacket.setProperty(ContainerSetDataPacket.FURNACE_LIT_TIME);
@@ -74,7 +76,7 @@ public abstract class AbstractFurnaceInventoryTranslator extends AbstractBlockIn
             return new BedrockContainerSlot(ContainerSlotType.FURNACE_FUEL, javaSlotToBedrock(slot));
         }
         if (slot == 2) {
-            return new BedrockContainerSlot(ContainerSlotType.FURNACE_OUTPUT, javaSlotToBedrock(slot));
+            return new BedrockContainerSlot(ContainerSlotType.FURNACE_RESULT, javaSlotToBedrock(slot));
         }
         return super.javaSlotToBedrockContainer(slot);
     }

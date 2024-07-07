@@ -25,39 +25,45 @@
 
 package org.geysermc.geyser.util;
 
-import com.github.steveice10.mc.protocol.data.game.entity.metadata.ItemStack;
-import com.github.steveice10.mc.protocol.data.game.entity.player.GameMode;
-import com.github.steveice10.mc.protocol.data.game.recipe.Ingredient;
-import com.github.steveice10.mc.protocol.packet.ingame.serverbound.inventory.ServerboundPickItemPacket;
-import com.github.steveice10.mc.protocol.packet.ingame.serverbound.inventory.ServerboundSetCreativeModeSlotPacket;
-import com.github.steveice10.opennbt.tag.builtin.CompoundTag;
-import com.nukkitx.nbt.NbtMap;
-import com.nukkitx.nbt.NbtMapBuilder;
-import com.nukkitx.nbt.NbtType;
-import com.nukkitx.protocol.bedrock.data.inventory.ContainerId;
-import com.nukkitx.protocol.bedrock.data.inventory.ItemData;
-import com.nukkitx.protocol.bedrock.packet.InventorySlotPacket;
-import com.nukkitx.protocol.bedrock.packet.PlayerHotbarPacket;
-import org.geysermc.geyser.inventory.Container;
-import org.geysermc.geyser.inventory.GeyserItemStack;
-import org.geysermc.geyser.inventory.Inventory;
-import org.geysermc.geyser.inventory.PlayerInventory;
+import org.checkerframework.checker.nullness.qual.Nullable;
+import org.cloudburstmc.math.vector.Vector3i;
+import org.cloudburstmc.nbt.NbtMap;
+import org.cloudburstmc.nbt.NbtMapBuilder;
+import org.cloudburstmc.nbt.NbtType;
+import org.cloudburstmc.protocol.bedrock.data.definitions.ItemDefinition;
+import org.cloudburstmc.protocol.bedrock.data.inventory.ContainerId;
+import org.cloudburstmc.protocol.bedrock.data.inventory.ItemData;
+import org.cloudburstmc.protocol.bedrock.packet.InventorySlotPacket;
+import org.cloudburstmc.protocol.bedrock.packet.PlayerHotbarPacket;
+import org.geysermc.geyser.GeyserImpl;
+import org.geysermc.geyser.inventory.*;
 import org.geysermc.geyser.inventory.click.Click;
 import org.geysermc.geyser.inventory.recipe.GeyserRecipe;
 import org.geysermc.geyser.inventory.recipe.GeyserShapedRecipe;
 import org.geysermc.geyser.inventory.recipe.GeyserShapelessRecipe;
+import org.geysermc.geyser.item.Items;
+import org.geysermc.geyser.item.type.Item;
+import org.geysermc.geyser.level.BedrockDimension;
 import org.geysermc.geyser.registry.Registries;
 import org.geysermc.geyser.registry.type.ItemMapping;
+import org.geysermc.geyser.registry.type.ItemMappings;
 import org.geysermc.geyser.session.GeyserSession;
 import org.geysermc.geyser.text.ChatColor;
 import org.geysermc.geyser.text.GeyserLocale;
 import org.geysermc.geyser.translator.inventory.InventoryTranslator;
 import org.geysermc.geyser.translator.inventory.LecternInventoryTranslator;
 import org.geysermc.geyser.translator.inventory.chest.DoubleChestInventoryTranslator;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.player.GameMode;
+import org.geysermc.mcprotocollib.protocol.data.game.item.ItemStack;
+import org.geysermc.mcprotocollib.protocol.data.game.item.component.DataComponents;
+import org.geysermc.mcprotocollib.protocol.data.game.recipe.Ingredient;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.inventory.ServerboundPickItemPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.inventory.ServerboundSetCreativeModeSlotPacket;
+import org.jetbrains.annotations.Contract;
 
-import javax.annotation.Nullable;
 import java.util.Arrays;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.Objects;
 import java.util.concurrent.TimeUnit;
 import java.util.function.IntFunction;
@@ -69,7 +75,7 @@ public class InventoryUtils {
      */
     public static int LAST_RECIPE_NET_ID;
     
-    public static final ItemStack REFRESH_ITEM = new ItemStack(1, 127, new CompoundTag(""));
+    public static final ItemStack REFRESH_ITEM = new ItemStack(1, 127, new DataComponents(new HashMap<>()));
 
     public static void openInventory(GeyserSession session, Inventory inventory) {
         session.setOpenInventory(inventory);
@@ -85,14 +91,14 @@ public class InventoryUtils {
 
     public static void displayInventory(GeyserSession session, Inventory inventory) {
         InventoryTranslator translator = session.getInventoryTranslator();
-        if (translator != null) {
-            translator.prepareInventory(session, inventory);
+        if (translator != null && translator.prepareInventory(session, inventory)) {
             if (translator instanceof DoubleChestInventoryTranslator && !((Container) inventory).isUsingRealBlock()) {
                 session.scheduleInEventLoop(() -> {
                     Inventory openInv = session.getOpenInventory();
-                    if (openInv != null && openInv.getId() == inventory.getId()) {
+                    if (openInv != null && openInv.getJavaId() == inventory.getJavaId()) {
                         translator.openInventory(session, inventory);
                         translator.updateInventory(session, inventory);
+                        openInv.setDisplayed(true);
                     } else if (openInv != null && openInv.isPending()) {
                         // Presumably, this inventory is no longer relevant, and the client doesn't care about it
                         displayInventory(session, openInv);
@@ -101,22 +107,24 @@ public class InventoryUtils {
             } else {
                 translator.openInventory(session, inventory);
                 translator.updateInventory(session, inventory);
+                inventory.setDisplayed(true);
             }
         } else {
-            // Precaution - as of 1.16 every inventory should be translated so this shouldn't happen
             session.setOpenInventory(null);
         }
     }
 
-    public static void closeInventory(GeyserSession session, int windowId, boolean confirm) {
+    public static void closeInventory(GeyserSession session, int javaId, boolean confirm) {
         session.getPlayerInventory().setCursor(GeyserItemStack.EMPTY, session);
         updateCursor(session);
 
-        Inventory inventory = getInventory(session, windowId);
+        Inventory inventory = getInventory(session, javaId);
         if (inventory != null) {
             InventoryTranslator translator = session.getInventoryTranslator();
             translator.closeInventory(session, inventory);
-            if (confirm && !inventory.isPending() && !(translator instanceof LecternInventoryTranslator)) {
+            if (confirm && inventory.isDisplayed() && !inventory.isPending()
+                    && !(translator instanceof LecternInventoryTranslator) // Closing lecterns is not followed with a close confirmation
+            ) {
                 session.setClosingInventory(true);
             }
         }
@@ -124,16 +132,42 @@ public class InventoryUtils {
         session.setOpenInventory(null);
     }
 
-    public static Inventory getInventory(GeyserSession session, int windowId) {
-        if (windowId == 0) {
+    public static @Nullable Inventory getInventory(GeyserSession session, int javaId) {
+        if (javaId == 0) {
+            // ugly hack: lecterns aren't their own inventory on Java, and can hence be closed with e.g. an id of 0
+            if (session.getOpenInventory() instanceof LecternContainer) {
+                return session.getOpenInventory();
+            }
             return session.getPlayerInventory();
         } else {
             Inventory openInventory = session.getOpenInventory();
-            if (openInventory != null && windowId == openInventory.getId()) {
+            if (openInventory != null && javaId == openInventory.getJavaId()) {
                 return openInventory;
             }
             return null;
         }
+    }
+
+    /**
+     * Finds a usable block space in the world to place a fake inventory block, and returns the position.
+     */
+    @Nullable
+    public static Vector3i findAvailableWorldSpace(GeyserSession session) {
+        // Check if a fake block can be placed, either above the player or beneath.
+        BedrockDimension dimension = session.getChunkCache().getBedrockDimension();
+        int minY = dimension.minY(), maxY = minY + dimension.height();
+        Vector3i flatPlayerPosition = session.getPlayerEntity().getPosition().toInt();
+        Vector3i position = flatPlayerPosition.add(Vector3i.UP);
+        if (position.getY() < minY) {
+            return null;
+        }
+        if (position.getY() >= maxY) {
+            position = flatPlayerPosition.sub(0, 4, 0);
+            if (position.getY() >= maxY) {
+                return null;
+            }
+        }
+        return position;
     }
 
     public static void updateCursor(GeyserSession session) {
@@ -145,28 +179,32 @@ public class InventoryUtils {
     }
 
     public static boolean canStack(GeyserItemStack item1, GeyserItemStack item2) {
+        if (GeyserImpl.getInstance().getConfig().isDebugMode())
+            canStackDebug(item1, item2);
         if (item1.isEmpty() || item2.isEmpty())
             return false;
-        return item1.getJavaId() == item2.getJavaId() && Objects.equals(item1.getNbt(), item2.getNbt());
+        return item1.getJavaId() == item2.getJavaId() && Objects.equals(item1.getComponents(), item2.getComponents());
     }
 
-    public static boolean canStack(ItemStack item1, ItemStack item2) {
-        if (item1 == null || item2 == null)
-            return false;
-        return item1.getId() == item2.getId() && Objects.equals(item1.getNbt(), item2.getNbt());
-    }
-
-    public static boolean canStack(ItemData item1, ItemData item2) {
-        if (item1 == null || item2 == null)
-            return false;
-        return item1.equals(item2, false, true, true);
+    private static void canStackDebug(GeyserItemStack item1, GeyserItemStack item2) {
+        DataComponents components1 = item1.getComponents();
+        DataComponents components2 = item2.getComponents();
+        if (components1 != null && components2 != null) {
+            if (components1.hashCode() == components2.hashCode() && !components1.equals(components2)) {
+                GeyserImpl.getInstance().getLogger().error("DEBUG: DataComponents hash collision");
+                GeyserImpl.getInstance().getLogger().error("hash: " + components1.hashCode());
+                GeyserImpl.getInstance().getLogger().error("components1: " + components1);
+                GeyserImpl.getInstance().getLogger().error("components2: " + components2);
+            }
+        }
     }
 
     /**
      * Checks to see if an item stack represents air or has no count.
      */
+    @Contract("null -> true")
     public static boolean isEmpty(@Nullable ItemStack itemStack) {
-        return itemStack == null || itemStack.getId() == ItemMapping.AIR.getJavaId() || itemStack.getAmount() <= 0;
+        return itemStack == null || itemStack.getId() == Items.AIR_ID || itemStack.getAmount() <= 0;
     }
 
     /**
@@ -186,9 +224,28 @@ public class InventoryUtils {
 
         root.put("display", display.build());
         return protocolVersion -> ItemData.builder()
-                .id(Registries.ITEMS.forVersion(protocolVersion).getStoredItems().barrier().getBedrockId())
+                .definition(getUnusableSpaceBlockDefinition(protocolVersion))
                 .count(1)
                 .tag(root.build()).build();
+    }
+
+    private static ItemDefinition getUnusableSpaceBlockDefinition(int protocolVersion) {
+        ItemMappings mappings = Registries.ITEMS.forVersion(protocolVersion);
+        String unusableSpaceBlock = GeyserImpl.getInstance().getConfig().getUnusableSpaceBlock();
+        ItemDefinition itemDefinition = mappings.getDefinition(unusableSpaceBlock);
+
+        if (itemDefinition == null) {
+            GeyserImpl.getInstance().getLogger().error("Invalid value " + unusableSpaceBlock + ". Resorting to barrier block.");
+            return mappings.getStoredItems().barrier().getBedrockDefinition();
+        } else {
+            return itemDefinition;
+        }
+    }
+
+    public static IntFunction<ItemData> getUpgradeTemplate() {
+        return protocolVersion -> ItemData.builder()
+                .definition(Registries.ITEMS.forVersion(protocolVersion).getStoredItems().upgradeTemplate().getBedrockDefinition())
+                .count(1).build();
     }
 
     /**
@@ -198,11 +255,10 @@ public class InventoryUtils {
      * @param itemStack the item to try to find a match for. NBT will also be accounted for.
      */
     public static void findOrCreateItem(GeyserSession session, ItemStack itemStack) {
-        PlayerInventory inventory = session.getPlayerInventory();
-
-        if (itemStack == null || itemStack.getId() == 0) {
+        if (isEmpty(itemStack)) {
             return;
         }
+        PlayerInventory inventory = session.getPlayerInventory();
 
         // Check hotbar for item
         for (int i = 36; i < 45; i++) {
@@ -211,7 +267,7 @@ public class InventoryUtils {
                 continue;
             }
             // If this is the item we're looking for
-            if (geyserItem.getJavaId() == itemStack.getId() && Objects.equals(geyserItem.getNbt(), itemStack.getNbt())) {
+            if (geyserItem.getJavaId() == itemStack.getId() && Objects.equals(geyserItem.getComponents(), itemStack.getDataComponents())) { //TODO verify
                 setHotbarItem(session, i);
                 // Don't check inventory if item was in hotbar
                 return;
@@ -225,9 +281,9 @@ public class InventoryUtils {
                 continue;
             }
             // If this is the item we're looking for
-            if (geyserItem.getJavaId() == itemStack.getId() && Objects.equals(geyserItem.getNbt(), itemStack.getNbt())) {
+            if (geyserItem.getJavaId() == itemStack.getId() && Objects.equals(geyserItem.getComponents(), itemStack.getDataComponents())) { //TODO verify
                 ServerboundPickItemPacket packetToSend = new ServerboundPickItemPacket(i); // https://wiki.vg/Protocol#Pick_Item
-                session.sendDownstreamPacket(packetToSend);
+                session.sendDownstreamGamePacket(packetToSend);
                 return;
             }
         }
@@ -236,13 +292,18 @@ public class InventoryUtils {
         if (session.getGameMode() == GameMode.CREATIVE) {
             int slot = findEmptyHotbarSlot(inventory);
 
-            ServerboundSetCreativeModeSlotPacket actionPacket = new ServerboundSetCreativeModeSlotPacket(slot,
+            ServerboundSetCreativeModeSlotPacket actionPacket = new ServerboundSetCreativeModeSlotPacket((short) slot,
                     itemStack);
             if ((slot - 36) != inventory.getHeldItemSlot()) {
                 setHotbarItem(session, slot);
             }
-            session.sendDownstreamPacket(actionPacket);
+            session.sendDownstreamGamePacket(actionPacket);
         }
+    }
+
+    // Please remove!!!
+    public static void findOrCreateItem(GeyserSession session, String itemName) {
+        findOrCreateItem(session, Registries.JAVA_ITEM_IDENTIFIERS.getOrDefault(itemName, Items.AIR));
     }
 
     /**
@@ -251,16 +312,16 @@ public class InventoryUtils {
      * If it is found in another part of the inventory, move it.
      * If it is not found and the user is in creative mode, create the item,
      * overriding the current item slot if no other hotbar slots are empty, or otherwise selecting the empty slot.
-     *
+     * <p>
      * This attempts to mimic Java Edition behavior as best as it can.
      * @param session the Bedrock client's session
-     * @param itemName the Java identifier of the item to search/select
+     * @param item the Java item to search/select for
      */
-    public static void findOrCreateItem(GeyserSession session, String itemName) {
+    public static void findOrCreateItem(GeyserSession session, Item item) {
         // Get the inventory to choose a slot to pick
         PlayerInventory inventory = session.getPlayerInventory();
 
-        if (itemName.equals("minecraft:air")) {
+        if (item == Items.AIR) {
             return;
         }
 
@@ -271,7 +332,7 @@ public class InventoryUtils {
                 continue;
             }
             // If this isn't the item we're looking for
-            if (!geyserItem.getMapping(session).getJavaIdentifier().equals(itemName)) {
+            if (!geyserItem.asItem().equals(item)) {
                 continue;
             }
 
@@ -287,12 +348,12 @@ public class InventoryUtils {
                 continue;
             }
             // If this isn't the item we're looking for
-            if (!geyserItem.getMapping(session).getJavaIdentifier().equals(itemName)) {
+            if (!geyserItem.asItem().equals(item)) {
                 continue;
             }
 
             ServerboundPickItemPacket packetToSend = new ServerboundPickItemPacket(i); // https://wiki.vg/Protocol#Pick_Item
-            session.sendDownstreamPacket(packetToSend);
+            session.sendDownstreamGamePacket(packetToSend);
             return;
         }
 
@@ -300,17 +361,13 @@ public class InventoryUtils {
         if (session.getGameMode() == GameMode.CREATIVE) {
             int slot = findEmptyHotbarSlot(inventory);
 
-            ItemMapping mapping = session.getItemMappings().getMapping(itemName);
-            if (mapping != null) {
-                ServerboundSetCreativeModeSlotPacket actionPacket = new ServerboundSetCreativeModeSlotPacket(slot,
-                        new ItemStack(mapping.getJavaId()));
-                if ((slot - 36) != inventory.getHeldItemSlot()) {
-                    setHotbarItem(session, slot);
-                }
-                session.sendDownstreamPacket(actionPacket);
-            } else {
-                session.getGeyser().getLogger().debug("Cannot find item for block " + itemName);
+            ItemMapping mapping = session.getItemMappings().getMapping(item);
+            ServerboundSetCreativeModeSlotPacket actionPacket = new ServerboundSetCreativeModeSlotPacket((short)slot,
+                    new ItemStack(mapping.getJavaItem().javaId()));
+            if ((slot - 36) != inventory.getHeldItemSlot()) {
+                setHotbarItem(session, slot);
             }
+            session.sendDownstreamGamePacket(actionPacket);
         }
     }
 
@@ -443,6 +500,7 @@ public class InventoryUtils {
         return null;
     }
 
+    @SuppressWarnings("BooleanMethodIsAlwaysInverted")
     private static boolean testShapedRecipe(final Ingredient[] ingredients, final IntFunction<GeyserItemStack> inventoryGetter,
                                             final int gridDimensions, final int firstRow, final int height, final int firstCol, final int width) {
         int ingredientIndex = 0;

@@ -25,8 +25,8 @@
 
 package org.geysermc.geyser.translator.protocol.bedrock;
 
-import com.github.steveice10.mc.protocol.packet.ingame.serverbound.inventory.ServerboundContainerClosePacket;
-import com.nukkitx.protocol.bedrock.packet.ContainerClosePacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.serverbound.inventory.ServerboundContainerClosePacket;
+import org.cloudburstmc.protocol.bedrock.packet.ContainerClosePacket;
 import org.geysermc.geyser.inventory.Inventory;
 import org.geysermc.geyser.inventory.MerchantContainer;
 import org.geysermc.geyser.session.GeyserSession;
@@ -40,23 +40,23 @@ public class BedrockContainerCloseTranslator extends PacketTranslator<ContainerC
 
     @Override
     public void translate(GeyserSession session, ContainerClosePacket packet) {
-        byte windowId = packet.getId();
+        byte bedrockId = packet.getId();
 
         //Client wants close confirmation
         session.sendUpstreamPacket(packet);
         session.setClosingInventory(false);
 
-        if (windowId == -1 && session.getOpenInventory() instanceof MerchantContainer) {
+        if (bedrockId == -1 && session.getOpenInventory() instanceof MerchantContainer) {
             // 1.16.200 - window ID is always -1 sent from Bedrock
-            windowId = (byte) session.getOpenInventory().getId();
+            bedrockId = (byte) session.getOpenInventory().getBedrockId();
         }
 
         Inventory openInventory = session.getOpenInventory();
         if (openInventory != null) {
-            if (windowId == openInventory.getId()) {
-                ServerboundContainerClosePacket closeWindowPacket = new ServerboundContainerClosePacket(windowId);
-                session.sendDownstreamPacket(closeWindowPacket);
-                InventoryUtils.closeInventory(session, windowId, false);
+            if (bedrockId == openInventory.getBedrockId()) {
+                ServerboundContainerClosePacket closeWindowPacket = new ServerboundContainerClosePacket(openInventory.getJavaId());
+                session.sendDownstreamGamePacket(closeWindowPacket);
+                InventoryUtils.closeInventory(session, openInventory.getJavaId(), false);
             } else if (openInventory.isPending()) {
                 InventoryUtils.displayInventory(session, openInventory);
                 openInventory.setPending(false);

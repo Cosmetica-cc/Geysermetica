@@ -25,14 +25,15 @@
 
 package org.geysermc.geyser.translator.protocol.java.level;
 
-import com.github.steveice10.mc.protocol.packet.ingame.clientbound.level.ClientboundForgetLevelChunkPacket;
-import com.nukkitx.math.vector.Vector3i;
+import org.cloudburstmc.math.vector.Vector3i;
 import org.geysermc.geyser.session.GeyserSession;
 import org.geysermc.geyser.translator.protocol.PacketTranslator;
 import org.geysermc.geyser.translator.protocol.Translator;
 import org.geysermc.geyser.util.ChunkUtils;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.level.ClientboundForgetLevelChunkPacket;
 
-import java.util.Iterator;
+import java.util.ArrayList;
+import java.util.List;
 
 @Translator(packet = ClientboundForgetLevelChunkPacket.class)
 public class JavaForgetLevelChunkTranslator extends PacketTranslator<ClientboundForgetLevelChunkPacket> {
@@ -41,26 +42,14 @@ public class JavaForgetLevelChunkTranslator extends PacketTranslator<Clientbound
     public void translate(GeyserSession session, ClientboundForgetLevelChunkPacket packet) {
         session.getChunkCache().removeChunk(packet.getX(), packet.getZ());
 
-        //Checks if a skull is in an unloaded chunk then removes it
-        Iterator<Vector3i> iterator = session.getSkullCache().keySet().iterator();
-        while (iterator.hasNext()) {
-            Vector3i position = iterator.next();
+        // Checks if a skull is in an unloaded chunk then removes it
+        List<Vector3i> removedSkulls = new ArrayList<>();
+        for (Vector3i position : session.getSkullCache().getSkulls().keySet()) {
             if ((position.getX() >> 4) == packet.getX() && (position.getZ() >> 4) == packet.getZ()) {
-                session.getSkullCache().get(position).despawnEntity();
-                iterator.remove();
+                removedSkulls.add(position);
             }
         }
-
-        if (!session.getGeyser().getWorldManager().shouldExpectLecternHandled()) {
-            // Do the same thing with lecterns
-            iterator = session.getLecternCache().iterator();
-            while (iterator.hasNext()) {
-                Vector3i position = iterator.next();
-                if ((position.getX() >> 4) == packet.getX() && (position.getZ() >> 4) == packet.getZ()) {
-                    iterator.remove();
-                }
-            }
-        }
+        removedSkulls.forEach(session.getSkullCache()::removeSkull);
 
         ChunkUtils.sendEmptyChunk(session, packet.getX(), packet.getZ(), false);
     }

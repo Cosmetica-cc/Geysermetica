@@ -25,8 +25,8 @@
 
 package org.geysermc.geyser.translator.protocol.java.title;
 
-import com.github.steveice10.mc.protocol.packet.ingame.clientbound.title.ClientboundClearTitlesPacket;
-import com.nukkitx.protocol.bedrock.packet.SetTitlePacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.title.ClientboundClearTitlesPacket;
+import org.cloudburstmc.protocol.bedrock.packet.SetTitlePacket;
 import org.geysermc.geyser.session.GeyserSession;
 import org.geysermc.geyser.translator.protocol.PacketTranslator;
 import org.geysermc.geyser.translator.protocol.Translator;
@@ -37,11 +37,14 @@ public class JavaClearTitlesTranslator extends PacketTranslator<ClientboundClear
     @Override
     public void translate(GeyserSession session, ClientboundClearTitlesPacket packet) {
         SetTitlePacket titlePacket = new SetTitlePacket();
-        // TODO handle packet.isResetTimes()
         titlePacket.setType(SetTitlePacket.Type.CLEAR);
         titlePacket.setText("");
         titlePacket.setXuid("");
         titlePacket.setPlatformOnlineId("");
         session.sendUpstreamPacket(titlePacket);
+
+        if (packet.isResetTimes()) {
+            session.getWorldCache().resetTitleTimes(true);
+        }
     }
 }

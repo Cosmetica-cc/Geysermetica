@@ -25,42 +25,50 @@
 
 package org.geysermc.geyser.entity.type.player;
 
-import com.github.steveice10.mc.auth.data.GameProfile;
-import com.nukkitx.math.vector.Vector3f;
-import com.nukkitx.math.vector.Vector3i;
-import com.nukkitx.protocol.bedrock.data.PlayerPermission;
-import com.nukkitx.protocol.bedrock.data.command.CommandPermission;
-import com.nukkitx.protocol.bedrock.data.entity.EntityData;
-import com.nukkitx.protocol.bedrock.data.entity.EntityFlag;
-import com.nukkitx.protocol.bedrock.packet.AddPlayerPacket;
 import lombok.Getter;
+import org.cloudburstmc.math.vector.Vector3f;
+import org.cloudburstmc.math.vector.Vector3i;
+import org.cloudburstmc.protocol.bedrock.data.GameType;
+import org.cloudburstmc.protocol.bedrock.data.PlayerPermission;
+import org.cloudburstmc.protocol.bedrock.data.command.CommandPermission;
+import org.cloudburstmc.protocol.bedrock.data.entity.EntityDataTypes;
+import org.cloudburstmc.protocol.bedrock.data.entity.EntityFlag;
+import org.cloudburstmc.protocol.bedrock.packet.AddPlayerPacket;
+import org.geysermc.geyser.level.block.property.Properties;
+import org.geysermc.geyser.level.block.type.BlockState;
+import org.geysermc.geyser.level.block.type.WallSkullBlock;
+import org.geysermc.geyser.level.physics.Direction;
 import org.geysermc.geyser.session.GeyserSession;
+import org.geysermc.geyser.session.cache.SkullCache;
+import org.geysermc.geyser.skin.SkullSkinManager;
+
+import java.util.Objects;
+import java.util.UUID;
+import java.util.concurrent.TimeUnit;
 
 /**
  * A wrapper to handle skulls more effectively - skulls have to be treated as entities since there are no
  * custom player skulls in Bedrock.
  */
 public class SkullPlayerEntity extends PlayerEntity {
-    /**
-     * Stores the block state that the skull is associated with. Used to determine if the block in the skull's position
-     * has changed
-     */
-    @Getter
-    private final int blockState;
 
-    public SkullPlayerEntity(GeyserSession session, long geyserId, GameProfile gameProfile, Vector3f position, float rotation, int blockState) {
-        super(session, 0, geyserId, gameProfile, position, Vector3f.ZERO, rotation, 0, rotation);
-        this.blockState = blockState;
-        setPlayerList(false);
+    @Getter
+    private UUID skullUUID;
+
+    @Getter
+    private Vector3i skullPosition;
+
+    public SkullPlayerEntity(GeyserSession session, long geyserId) {
+        super(session, 0, geyserId, UUID.randomUUID(), Vector3f.ZERO, Vector3f.ZERO, 0, 0, 0, "", null);
     }
 
     @Override
     protected void initializeMetadata() {
         // Deliberately do not call super
         // Set bounding box to almost nothing so the skull is able to be broken and not cause entity to cast a shadow
-        dirtyMetadata.put(EntityData.SCALE, 1.08f);
-        dirtyMetadata.put(EntityData.BOUNDING_BOX_HEIGHT, 0.001f);
-        dirtyMetadata.put(EntityData.BOUNDING_BOX_WIDTH, 0.001f);
+        dirtyMetadata.put(EntityDataTypes.SCALE, 1.08f);
+        dirtyMetadata.put(EntityDataTypes.HEIGHT, 0.001f);
+        dirtyMetadata.put(EntityDataTypes.WIDTH, 0.001f);
         setFlag(EntityFlag.CAN_SHOW_NAME, false);
         setFlag(EntityFlag.INVISIBLE, true); // Until the skin is loaded
     }
@@ -79,10 +87,12 @@ public class SkullPlayerEntity extends PlayerEntity {
         addPlayerPacket.setRotation(getBedrockRotation());
         addPlayerPacket.setMotion(motion);
         addPlayerPacket.setHand(hand);
-        addPlayerPacket.getAdventureSettings().setCommandPermission(CommandPermission.NORMAL);
+        addPlayerPacket.getAdventureSettings().setCommandPermission(CommandPermission.ANY);
         addPlayerPacket.getAdventureSettings().setPlayerPermission(PlayerPermission.MEMBER);
         addPlayerPacket.setDeviceId("");
         addPlayerPacket.setPlatformChatId("");
+        addPlayerPacket.setGameType(GameType.SURVIVAL);
+        addPlayerPacket.setAbilityLayers(BASE_ABILITY_LAYER);
         addPlayerPacket.getMetadata().putFlags(flags);
         dirtyMetadata.apply(addPlayerPacket.getMetadata());
 
@@ -92,8 +102,59 @@ public class SkullPlayerEntity extends PlayerEntity {
         session.sendUpstreamPacket(addPlayerPacket);
     }
 
-    public void despawnEntity(Vector3i position) {
-        this.despawnEntity();
-        session.getSkullCache().remove(position, this);
+    /**
+     * Hide the player entity so that it can be reused for a different skull.
+     */
+    public void free() {
+        setFlag(EntityFlag.INVISIBLE, true);
+        updateBedrockMetadata();
+
+        // Move skull entity out of the way
+        moveAbsolute(session.getPlayerEntity().getPosition().up(128), 0, 0, 0, false, true);
+    }
+
+    public void updateSkull(SkullCache.Skull skull) {
+        skullPosition = skull.getPosition();
+
+        if (!Objects.equals(skull.getTexturesProperty(), getTexturesProperty()) || !Objects.equals(skullUUID, skull.getUuid())) {
+            // Make skull invisible as we change skins
+            setFlag(EntityFlag.INVISIBLE, true);
+            updateBedrockMetadata();
+
+            skullUUID = skull.getUuid();
+            setTexturesProperty(skull.getTexturesProperty());
+
+            SkullSkinManager.requestAndHandleSkin(this, session, (skin -> session.scheduleInEventLoop(() -> {
+                // Delay to minimize split-second "player" pop-in
+                setFlag(EntityFlag.INVISIBLE, false);
+                updateBedrockMetadata();
+            }, 250, TimeUnit.MILLISECONDS)));
+        } else {
+            // Just a rotation/position change
+            setFlag(EntityFlag.INVISIBLE, false);
+            updateBedrockMetadata();
+        }
+
+        float x = skull.getPosition().getX() + .5f;
+        float y = skull.getPosition().getY() - .01f;
+        float z = skull.getPosition().getZ() + .5f;
+        float rotation;
+
+        BlockState blockState = skull.getBlockState();
+        if (blockState.block() instanceof WallSkullBlock) {
+            y += 0.25f;
+            Direction direction = blockState.getValue(Properties.HORIZONTAL_FACING);
+            rotation = WallSkullBlock.getDegrees(direction);
+            switch (direction) {
+                case NORTH -> z += 0.24f;
+                case SOUTH -> z -= 0.24f;
+                case WEST -> x += 0.24f;
+                case EAST -> x -= 0.24f;
+            }
+        } else {
+            rotation = (180f + blockState.getValue(Properties.ROTATION_16, 0) * 22.5f) % 360;
+        }
+
+        moveAbsolute(Vector3f.from(x, y, z), rotation, 0, rotation, true, true);
     }
 }

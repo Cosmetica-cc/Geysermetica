@@ -35,6 +35,7 @@ import com.fasterxml.jackson.databind.ser.ContextualSerializer;
 import com.fasterxml.jackson.databind.ser.std.StdSerializer;
 
 import java.io.IOException;
+import java.io.Serial;
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
@@ -42,6 +43,11 @@ import java.lang.annotation.Target;
 import java.util.Optional;
 
 public class AsteriskSerializer extends StdSerializer<Object> implements ContextualSerializer {
+
+    @Serial
+    private static final long serialVersionUID = 1L;
+
+    public static final String[] NON_SENSITIVE_ADDRESSES = {"", "0.0.0.0", "localhost", "127.0.0.1", "auto", "unknown"};
 
     public static boolean showSensitive = false;
 
@@ -62,6 +68,7 @@ public class AsteriskSerializer extends StdSerializer<Object> implements Context
     String asterisk;
     boolean isIp;
 
+    @SuppressWarnings("unused") // Used by Jackson for Geyser dumps
     public AsteriskSerializer() {
         super(Object.class);
     }
@@ -77,7 +84,7 @@ public class AsteriskSerializer extends StdSerializer<Object> implements Context
         Optional<Asterisk> anno = Optional.ofNullable(property)
                 .map(prop -> prop.getAnnotation(Asterisk.class));
 
-        return new AsteriskSerializer(anno.map(Asterisk::value).orElse(null), anno.map(Asterisk::isIp).orElse(null));
+        return new AsteriskSerializer(anno.map(Asterisk::value).orElse(null), anno.map(Asterisk::isIp).orElse(false));
     }
 
     @Override
@@ -91,11 +98,11 @@ public class AsteriskSerializer extends StdSerializer<Object> implements Context
     }
 
     private boolean isSensitiveIp(String ip) {
-        if (ip.equalsIgnoreCase("localhost") || ip.equalsIgnoreCase("auto")) {
-            // `auto` should not be shown unless there is an obscure issue with setting the localhost address
-            return false;
+        for (String address : NON_SENSITIVE_ADDRESSES) {
+            if (address.equalsIgnoreCase(ip)) {
+                return false;
+            }
         }
-
-        return !ip.isEmpty() && !ip.equals("0.0.0.0") && !ip.equals("127.0.0.1");
+        return true;
     }
 }

@@ -25,64 +25,102 @@
 
 package org.geysermc.geyser.translator.protocol.java;
 
-import com.github.steveice10.mc.protocol.packet.ingame.clientbound.ClientboundLoginPacket;
-import com.github.steveice10.mc.protocol.packet.ingame.serverbound.ServerboundCustomPayloadPacket;
-import com.nukkitx.protocol.bedrock.data.GameRuleData;
-import com.nukkitx.protocol.bedrock.data.PlayerPermission;
-import com.nukkitx.protocol.bedrock.packet.AdventureSettingsPacket;
-import com.nukkitx.protocol.bedrock.packet.GameRulesChangedPacket;
-import com.nukkitx.protocol.bedrock.packet.SetPlayerGameTypePacket;
-import org.geysermc.geyser.entity.type.player.PlayerEntity;
+import net.kyori.adventure.key.Key;
+import org.geysermc.erosion.Constants;
+import org.geysermc.geyser.util.MinecraftKey;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.player.PlayerSpawnInfo;
+import org.geysermc.mcprotocollib.protocol.packet.common.serverbound.ServerboundCustomPayloadPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.ClientboundLoginPacket;
+import org.cloudburstmc.math.vector.Vector3f;
+import org.cloudburstmc.protocol.bedrock.data.GameRuleData;
+import org.cloudburstmc.protocol.bedrock.data.LevelEvent;
+import org.cloudburstmc.protocol.bedrock.packet.GameRulesChangedPacket;
+import org.cloudburstmc.protocol.bedrock.packet.LevelEventPacket;
+import org.cloudburstmc.protocol.bedrock.packet.SetPlayerGameTypePacket;
+import org.geysermc.floodgate.pluginmessage.PluginMessageChannels;
+import org.geysermc.geyser.api.network.AuthType;
+import org.geysermc.geyser.entity.type.player.SessionPlayerEntity;
+import org.geysermc.geyser.erosion.GeyserboundHandshakePacketHandler;
 import org.geysermc.geyser.session.GeyserSession;
-import org.geysermc.geyser.session.auth.AuthType;
-import org.geysermc.geyser.translator.level.BiomeTranslator;
 import org.geysermc.geyser.translator.protocol.PacketTranslator;
 import org.geysermc.geyser.translator.protocol.Translator;
 import org.geysermc.geyser.util.ChunkUtils;
 import org.geysermc.geyser.util.DimensionUtils;
-import org.geysermc.geyser.util.PluginMessageUtils;
+import org.geysermc.geyser.util.EntityUtils;
+
+import java.nio.charset.StandardCharsets;
+import java.util.Arrays;
 
 @Translator(packet = ClientboundLoginPacket.class)
 public class JavaLoginTranslator extends PacketTranslator<ClientboundLoginPacket> {
 
     @Override
     public void translate(GeyserSession session, ClientboundLoginPacket packet) {
-        PlayerEntity entity = session.getPlayerEntity();
+        SessionPlayerEntity entity = session.getPlayerEntity();
         entity.setEntityId(packet.getEntityId());
+
+        if (session.getErosionHandler().isActive()) {
+            session.getErosionHandler().close();
+            session.setErosionHandler(new GeyserboundHandshakePacketHandler(session));
+        }
+
+        PlayerSpawnInfo spawnInfo = packet.getCommonPlayerSpawnInfo();
 
         // If the player is already initialized and a join game packet is sent, they
         // are swapping servers
-        String newDimension = DimensionUtils.getNewDimension(packet.getDimension());
         if (session.isSpawned()) {
-            String fakeDim = DimensionUtils.getTemporaryDimension(session.getDimension(), newDimension);
+            int fakeDim = DimensionUtils.getTemporaryDimension(session.getDimension(), spawnInfo.getDimension());
             DimensionUtils.switchDimension(session, fakeDim);
 
             session.getWorldCache().removeScoreboard();
+
+            // Remove all bossbars
+            session.getEntityCache().removeAllBossBars();
+            // Remove extra hearts, hunger, etc.
+            entity.resetAttributes();
+            entity.resetMetadata();
+
+            // Reset weather
+            if (session.isRaining()) {
+                LevelEventPacket stopRainPacket = new LevelEventPacket();
+                stopRainPacket.setType(LevelEvent.STOP_RAINING);
+                stopRainPacket.setData(0);
+                stopRainPacket.setPosition(Vector3f.ZERO);
+                session.sendUpstreamPacket(stopRainPacket);
+                session.setRaining(false);
+            }
+
+            if (session.isThunder()) {
+                LevelEventPacket stopThunderPacket = new LevelEventPacket();
+                stopThunderPacket.setType(LevelEvent.STOP_THUNDERSTORM);
+                stopThunderPacket.setData(0);
+                stopThunderPacket.setPosition(Vector3f.ZERO);
+                session.sendUpstreamPacket(stopThunderPacket);
+                session.setThunder(false);
+            }
         }
-        session.setWorldName(packet.getWorldName());
 
-        BiomeTranslator.loadServerBiomes(session, packet.getDimensionCodec());
-        session.getTagCache().clear();
-
-        session.setGameMode(packet.getGameMode());
+        session.setWorldName(spawnInfo.getWorldName());
+        session.setLevels(Arrays.stream(packet.getWorldNames()).map(Key::asString).toArray(String[]::new));
+        session.setGameMode(spawnInfo.getGameMode());
+        int newDimension = spawnInfo.getDimension();
 
         boolean needsSpawnPacket = !session.isSentSpawnPacket();
         if (needsSpawnPacket) {
             // The player has yet to spawn so let's do that using some of the information in this Java packet
             session.setDimension(newDimension);
+            DimensionUtils.setBedrockDimension(session, newDimension);
             session.connect();
-        }
 
-        AdventureSettingsPacket bedrockPacket = new AdventureSettingsPacket();
-        bedrockPacket.setUniqueEntityId(session.getPlayerEntity().getGeyserId());
-        bedrockPacket.setPlayerPermission(PlayerPermission.MEMBER);
-        session.sendUpstreamPacket(bedrockPacket);
-
-        if (!needsSpawnPacket) {
+            // It is now safe to send these packets
+            session.getUpstream().sendPostStartGamePackets();
+        } else {
             SetPlayerGameTypePacket playerGameTypePacket = new SetPlayerGameTypePacket();
-            playerGameTypePacket.setGamemode(packet.getGameMode().ordinal());
+            playerGameTypePacket.setGamemode(EntityUtils.toBedrockGamemode(spawnInfo.getGameMode()).ordinal());
             session.sendUpstreamPacket(playerGameTypePacket);
         }
+
+        entity.setLastDeathPosition(spawnInfo.getLastDeathPos());
 
         entity.updateBedrockMetadata();
 
@@ -95,23 +133,23 @@ public class JavaLoginTranslator extends PacketTranslator<ClientboundLoginPacket
 
         session.setServerRenderDistance(packet.getViewDistance());
 
-        // TODO customize
+        // send this again now that we know the server render distance
+        // as the bedrock client isn't required to send a render distance
         session.sendJavaClientSettings();
 
-        session.sendDownstreamPacket(new ServerboundCustomPayloadPacket("minecraft:brand", PluginMessageUtils.getGeyserBrandData()));
-
-        // register the plugin messaging channels used in Floodgate
-        if (session.getRemoteAuthType() == AuthType.FLOODGATE) {
-            session.sendDownstreamPacket(new ServerboundCustomPayloadPacket("minecraft:register", PluginMessageUtils.getFloodgateRegisterData()));
+        Key register = MinecraftKey.key("register");
+        if (session.remoteServer().authType() == AuthType.FLOODGATE) {
+            session.sendDownstreamPacket(new ServerboundCustomPayloadPacket(register, PluginMessageChannels.getFloodgateRegisterData()));
         }
+        session.sendDownstreamPacket(new ServerboundCustomPayloadPacket(register, Constants.PLUGIN_MESSAGE.getBytes(StandardCharsets.UTF_8)));
 
-        if (!newDimension.equals(session.getDimension())) {
+        if (newDimension != session.getDimension()) {
             DimensionUtils.switchDimension(session, newDimension);
-        } else if (DimensionUtils.isCustomBedrockNetherId() && newDimension.equalsIgnoreCase(DimensionUtils.NETHER)) {
+        } else if (DimensionUtils.isCustomBedrockNetherId() && newDimension == DimensionUtils.NETHER) {
             // If the player is spawning into the "fake" nether, send them some fog
-            session.sendFog("minecraft:fog_hell");
+            session.camera().sendFog(DimensionUtils.BEDROCK_FOG_HELL);
         }
 
-        ChunkUtils.loadDimensionTag(session, packet.getDimension());
+        ChunkUtils.loadDimension(session);
     }
 }

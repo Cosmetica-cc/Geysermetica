@@ -25,124 +25,135 @@
 
 package org.geysermc.geyser.translator.level.block.entity;
 
-import com.github.steveice10.mc.auth.data.GameProfile;
-import com.github.steveice10.mc.protocol.data.game.level.block.BlockEntityType;
-import com.github.steveice10.opennbt.tag.builtin.CompoundTag;
-import com.github.steveice10.opennbt.tag.builtin.ListTag;
-import com.github.steveice10.opennbt.tag.builtin.StringTag;
-import com.nukkitx.math.vector.Vector3f;
-import com.nukkitx.math.vector.Vector3i;
-import com.nukkitx.nbt.NbtMapBuilder;
-import com.nukkitx.protocol.bedrock.data.entity.EntityFlag;
-import org.geysermc.geyser.entity.type.player.SkullPlayerEntity;
+import org.checkerframework.checker.nullness.qual.Nullable;
+import org.cloudburstmc.math.vector.Vector3i;
+import org.cloudburstmc.nbt.NbtMap;
+import org.cloudburstmc.nbt.NbtMapBuilder;
+import org.cloudburstmc.nbt.NbtType;
+import org.cloudburstmc.protocol.bedrock.data.definitions.BlockDefinition;
+import org.cloudburstmc.protocol.bedrock.packet.UpdateBlockPacket;
+import org.geysermc.geyser.GeyserImpl;
+import org.geysermc.geyser.level.block.property.Properties;
+import org.geysermc.geyser.level.block.type.BlockState;
+import org.geysermc.geyser.level.block.type.SkullBlock;
 import org.geysermc.geyser.session.GeyserSession;
-import org.geysermc.geyser.level.block.BlockStateValues;
+import org.geysermc.geyser.session.cache.SkullCache;
 import org.geysermc.geyser.skin.SkinProvider;
-import org.geysermc.geyser.skin.SkullSkinManager;
+import org.geysermc.mcprotocollib.protocol.data.game.level.block.BlockEntityType;
 
-import java.util.ArrayList;
-import java.util.LinkedHashMap;
+import java.nio.charset.StandardCharsets;
 import java.util.List;
+import java.util.Locale;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.TimeUnit;
+import java.util.concurrent.ExecutionException;
 
 @BlockEntity(type = BlockEntityType.SKULL)
 public class SkullBlockEntityTranslator extends BlockEntityTranslator implements RequiresBlockState {
-
     @Override
-    public void translateTag(NbtMapBuilder builder, CompoundTag tag, int blockState) {
-        byte skullVariant = BlockStateValues.getSkullVariant(blockState);
-        float rotation = BlockStateValues.getSkullRotation(blockState) * 22.5f;
-        // Just in case...
-        if (skullVariant == -1) {
-            skullVariant = 0;
+    public void translateTag(GeyserSession session, NbtMapBuilder bedrockNbt, NbtMap javaNbt, BlockState blockState) {
+        Integer rotation = blockState.getValue(Properties.ROTATION_16);
+        if (rotation != null) {
+            // Could be a wall skull block otherwise, which has rotation in its Bedrock state
+            bedrockNbt.putFloat("Rotation", rotation * 22.5f);
         }
-        builder.put("Rotation", rotation);
-        builder.put("SkullType", skullVariant);
+        bedrockNbt.putByte("SkullType", (byte) (blockState.block() instanceof SkullBlock skull ? skull.skullType().bedrockId() : 0));
+        if (blockState.getValue(Properties.POWERED)) {
+            bedrockNbt.putBoolean("MouthMoving", true);
+        }
     }
 
-    public static CompletableFuture<GameProfile> getProfile(CompoundTag tag) {
-        CompoundTag owner = tag.get("SkullOwner");
-        if (owner != null) {
-            CompoundTag properties = owner.get("Properties");
-            if (properties == null) {
-                return SkinProvider.requestTexturesFromUsername(owner);
-            }
-
-            ListTag textures = properties.get("textures");
-            LinkedHashMap<?,?> tag1 = (LinkedHashMap<?,?>) textures.get(0).getValue();
-            StringTag texture = (StringTag) tag1.get("Value");
-
-            List<GameProfile.Property> profileProperties = new ArrayList<>();
-
-            GameProfile gameProfile = new GameProfile(UUID.randomUUID(), "");
-            profileProperties.add(new GameProfile.Property("textures", texture.getValue()));
-            gameProfile.setProperties(profileProperties);
-            return CompletableFuture.completedFuture(gameProfile);
+    private static UUID getUUID(NbtMap profile) {
+        int[] uuidAsArray = profile.getIntArray("id");
+        if (uuidAsArray.length == 4) {
+            // thank u viaversion
+            return new UUID((long) uuidAsArray[0] << 32 | ((long) uuidAsArray[1] & 0xFFFFFFFFL),
+                    (long) uuidAsArray[2] << 32 | ((long) uuidAsArray[3] & 0xFFFFFFFFL));
         }
-        return CompletableFuture.completedFuture(null);
+        // Convert username to an offline UUID
+        String username = null;
+        String nameTag = profile.getString("name", null);
+        if (nameTag != null) {
+            username = nameTag.toLowerCase(Locale.ROOT);
+        }
+        return UUID.nameUUIDFromBytes(("OfflinePlayer:" + username).getBytes(StandardCharsets.UTF_8));
     }
 
-    public static void spawnPlayer(GeyserSession session, CompoundTag tag, int posX, int posY, int posZ, int blockState) {
-        float x = posX + .5f;
-        float y = posY - .01f;
-        float z = posZ + .5f;
-        float rotation;
-
-        byte floorRotation = BlockStateValues.getSkullRotation(blockState);
-        if (floorRotation == -1) {
-            // Wall skull
-            y += 0.25f;
-            rotation = BlockStateValues.getSkullWallDirections().get(blockState);
-            switch ((int) rotation) {
-                case 180 -> z += 0.24f; // North
-                case 0 -> z -= 0.24f; // South
-                case 90 -> x += 0.24f; // West
-                case 270 -> x -= 0.24f; // East
+    private static CompletableFuture<@Nullable String> getTextures(NbtMap profile, UUID uuid) {
+        List<NbtMap> properties = profile.getList("properties", NbtType.COMPOUND);
+        if (properties.isEmpty()) {
+            if (uuid != null && uuid.version() == 4) {
+                String uuidString = uuid.toString().replace("-", "");
+                return SkinProvider.requestTexturesFromUUID(uuidString);
+            } else {
+                String nameTag = profile.getString("name", null);
+                if (nameTag != null) {
+                    // Fall back to username if UUID was missing or was an offline mode UUID
+                    return SkinProvider.requestTexturesFromUsername(nameTag);
+                }
             }
-        } else {
-            rotation = (180f + (floorRotation * 22.5f)) % 360;
+            return CompletableFuture.completedFuture(null);
         }
 
-        Vector3i blockPosition = Vector3i.from(posX, posY, posZ);
-        Vector3f entityPosition = Vector3f.from(x, y, z);
+        NbtMap tag1 = properties.get(0);
+        String texture = tag1.getString("value", null);
+        return CompletableFuture.completedFuture(texture);
+    }
 
-        getProfile(tag).whenComplete((gameProfile, throwable) -> {
-            if (gameProfile == null) {
-                session.getGeyser().getLogger().debug("Custom skull with invalid SkullOwner tag: " + blockPosition + " " + tag);
+    public static @Nullable BlockDefinition translateSkull(GeyserSession session, NbtMap javaNbt, Vector3i blockPosition, BlockState blockState) {
+        NbtMap profile = javaNbt.getCompound("profile");
+        if (profile.isEmpty()) {
+            session.getSkullCache().removeSkull(blockPosition);
+            return null;
+        }
+        UUID uuid = getUUID(profile);
+
+        CompletableFuture<String> texturesFuture = getTextures(profile, uuid);
+        if (texturesFuture.isDone()) {
+            try {
+                String texture = texturesFuture.get();
+                if (texture == null) {
+                    session.getGeyser().getLogger().debug("Custom skull with invalid profile tag: " + blockPosition + " " + javaNbt);
+                    return null;
+                }
+                SkullCache.Skull skull = session.getSkullCache().putSkull(blockPosition, uuid, texture, blockState);
+                return skull.getBlockDefinition();
+            } catch (InterruptedException | ExecutionException e) {
+                session.getGeyser().getLogger().debug("Failed to acquire textures for custom skull: " + blockPosition + " " + javaNbt);
+                if (GeyserImpl.getInstance().getConfig().isDebugMode()) {
+                    e.printStackTrace();
+                }
+            }
+            return null;
+        }
+
+        // profile contained a username, so we have to wait for it to be retrieved
+        texturesFuture.whenComplete((texturesProperty, throwable) -> {
+            if (texturesProperty == null) {
+                session.getGeyser().getLogger().debug("Custom skull with invalid profile tag: " + blockPosition + " " + javaNbt);
                 return;
             }
-
             if (session.getEventLoop().inEventLoop()) {
-                spawnPlayer(session, gameProfile, blockPosition, entityPosition, rotation, blockState);
+                putSkull(session, blockPosition, uuid, texturesProperty, blockState);
             } else {
-                session.executeInEventLoop(() -> spawnPlayer(session, gameProfile, blockPosition, entityPosition, rotation, blockState));
+                session.executeInEventLoop(() -> putSkull(session, blockPosition, uuid, texturesProperty, blockState));
             }
         });
+
+        // We don't have the textures yet, so we can't determine if a custom block was defined for this skull
+        return null;
     }
 
-    private static void spawnPlayer(GeyserSession session, GameProfile profile, Vector3i blockPosition,
-                                    Vector3f entityPosition, float rotation, int blockState) {
-        long geyserId = session.getEntityCache().getNextEntityId().incrementAndGet();
-
-        SkullPlayerEntity existingSkull = session.getSkullCache().get(blockPosition);
-        if (existingSkull != null) {
-            // Ensure that two skulls can't spawn on the same point
-            existingSkull.despawnEntity(blockPosition);
+    private static void putSkull(GeyserSession session, Vector3i blockPosition, UUID uuid, String texturesProperty, BlockState blockState) {
+        SkullCache.Skull skull = session.getSkullCache().putSkull(blockPosition, uuid, texturesProperty, blockState);
+        if (skull.getBlockDefinition() != null) {
+            UpdateBlockPacket updateBlockPacket = new UpdateBlockPacket();
+            updateBlockPacket.setDataLayer(0);
+            updateBlockPacket.setBlockPosition(blockPosition);
+            updateBlockPacket.setDefinition(skull.getBlockDefinition());
+            updateBlockPacket.getFlags().add(UpdateBlockPacket.Flag.NEIGHBORS);
+            updateBlockPacket.getFlags().add(UpdateBlockPacket.Flag.NETWORK);
+            session.sendUpstreamPacket(updateBlockPacket);
         }
-
-        SkullPlayerEntity player = new SkullPlayerEntity(session, geyserId, profile, entityPosition, rotation, blockState);
-
-        // Cache entity
-        session.getSkullCache().put(blockPosition, player);
-
-        player.spawnEntity();
-
-        SkullSkinManager.requestAndHandleSkin(player, session, (skin -> session.scheduleInEventLoop(() -> {
-            // Delay to minimize split-second "player" pop-in
-            player.setFlag(EntityFlag.INVISIBLE, false);
-            player.updateBedrockMetadata();
-        }, 250, TimeUnit.MILLISECONDS)));
     }
 }

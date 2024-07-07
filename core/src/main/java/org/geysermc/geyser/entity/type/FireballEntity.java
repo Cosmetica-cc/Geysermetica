@@ -25,7 +25,7 @@
 
 package org.geysermc.geyser.entity.type;
 
-import com.nukkitx.math.vector.Vector3f;
+import org.cloudburstmc.math.vector.Vector3f;
 import org.geysermc.geyser.entity.EntityDefinition;
 import org.geysermc.geyser.session.GeyserSession;
 
@@ -72,6 +72,9 @@ public class FireballEntity extends ThrowableEntity {
 
     @Override
     public void tick() {
-        moveAbsoluteImmediate(tickMovement(position), yaw, pitch, headYaw, false, false);
+        if (removedInVoid()) {
+            return;
+        }
+        moveAbsoluteImmediate(tickMovement(position), getYaw(), getPitch(), getHeadYaw(), false, false);
     }
 }

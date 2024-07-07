@@ -25,10 +25,11 @@
 
 package org.geysermc.geyser.entity.type.living.animal;
 
-import com.nukkitx.math.vector.Vector3f;
+import org.checkerframework.checker.nullness.qual.Nullable;
+import org.cloudburstmc.math.vector.Vector3f;
 import org.geysermc.geyser.entity.EntityDefinition;
 import org.geysermc.geyser.session.GeyserSession;
-import org.geysermc.geyser.registry.type.ItemMapping;
+import org.geysermc.geyser.session.cache.tags.ItemTag;
 
 import java.util.UUID;
 
@@ -39,7 +40,8 @@ public class ChickenEntity extends AnimalEntity {
     }
 
     @Override
-    public boolean canEat(String javaIdentifierStripped, ItemMapping mapping) {
-        return javaIdentifierStripped.contains("seeds");
+    @Nullable
+    protected ItemTag getFoodTag() {
+        return ItemTag.CHICKEN_FOOD;
     }
 }

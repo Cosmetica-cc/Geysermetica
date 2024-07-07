@@ -25,15 +25,12 @@
 
 package org.geysermc.geyser.util;
 
-import com.github.steveice10.mc.protocol.data.game.entity.player.GameMode;
-import com.github.steveice10.mc.protocol.data.game.setting.Difficulty;
+import org.geysermc.cumulus.component.DropdownComponent;
+import org.geysermc.cumulus.form.CustomForm;
 import org.geysermc.geyser.GeyserImpl;
 import org.geysermc.geyser.level.GameRule;
-import org.geysermc.geyser.session.GeyserSession;
 import org.geysermc.geyser.level.WorldManager;
-import org.geysermc.cumulus.CustomForm;
-import org.geysermc.cumulus.component.DropdownComponent;
-import org.geysermc.cumulus.response.CustomFormResponse;
+import org.geysermc.geyser.session.GeyserSession;
 import org.geysermc.geyser.text.GeyserLocale;
 import org.geysermc.geyser.text.MinecraftLocale;
 
@@ -45,54 +42,41 @@ public class SettingsUtils {
      */
     public static CustomForm buildForm(GeyserSession session) {
         // Cache the language for cleaner access
-        String language = session.getLocale();
+        String language = session.locale();
 
         CustomForm.Builder builder = CustomForm.builder()
                 .translator(SettingsUtils::translateEntry, language)
                 .title("geyser.settings.title.main")
                 .iconPath("textures/ui/settings_glyph_color_2x.png");
 
+        // Let's store these to avoid issues
+        boolean showCoordinates = session.getPreferencesCache().isAllowShowCoordinates();
+        boolean cooldownShown = CooldownUtils.getDefaultShowCooldown() != CooldownUtils.CooldownType.DISABLED;
+        boolean customSkulls = session.getGeyser().getConfig().isAllowCustomSkulls();
+
         // Only show the client title if any of the client settings are available
-        boolean showClientSettings = session.getPreferencesCache().isAllowShowCoordinates()
-                || CooldownUtils.getDefaultShowCooldown() != CooldownUtils.CooldownType.DISABLED
-                || session.getGeyser().getConfig().isAllowCustomSkulls();
+        boolean showClientSettings = showCoordinates || cooldownShown || customSkulls;
 
         if (showClientSettings) {
             builder.label("geyser.settings.title.client");
 
             // Client can only see its coordinates if reducedDebugInfo is disabled and coordinates are enabled in geyser config.
-            if (session.getPreferencesCache().isAllowShowCoordinates()) {
-                builder.toggle("geyser.settings.option.coordinates", session.getPreferencesCache().isPrefersShowCoordinates());
+            if (showCoordinates) {
+                builder.toggle("%createWorldScreen.showCoordinates", session.getPreferencesCache().isPrefersShowCoordinates());
             }
 
-            if (CooldownUtils.getDefaultShowCooldown() != CooldownUtils.CooldownType.DISABLED) {
+            if (cooldownShown) {
                 DropdownComponent.Builder cooldownDropdown = DropdownComponent.builder("options.attackIndicator");
-                cooldownDropdown.option("options.attack.crosshair", session.getPreferencesCache().getCooldownPreference() == CooldownUtils.CooldownType.TITLE);
-                cooldownDropdown.option("options.attack.hotbar", session.getPreferencesCache().getCooldownPreference() == CooldownUtils.CooldownType.ACTIONBAR);
-                cooldownDropdown.option("options.off", session.getPreferencesCache().getCooldownPreference() == CooldownUtils.CooldownType.DISABLED);
+                CooldownUtils.CooldownType currentCooldownType = session.getPreferencesCache().getCooldownPreference();
+                cooldownDropdown.option("options.attack.crosshair", currentCooldownType == CooldownUtils.CooldownType.TITLE);
+                cooldownDropdown.option("options.attack.hotbar", currentCooldownType == CooldownUtils.CooldownType.ACTIONBAR);
+                cooldownDropdown.option("options.off", currentCooldownType == CooldownUtils.CooldownType.DISABLED);
                 builder.dropdown(cooldownDropdown);
             }
 
-            if (session.getGeyser().getConfig().isAllowCustomSkulls()) {
+            if (customSkulls) {
                 builder.toggle("geyser.settings.option.customSkulls", session.getPreferencesCache().isPrefersCustomSkulls());
             }
-        }
-
-        boolean canModifyServer = session.getOpPermissionLevel() >= 2 || session.hasPermission("geyser.settings.server");
-        if (canModifyServer) {
-            builder.label("geyser.settings.title.server");
-
-            DropdownComponent.Builder gamemodeDropdown = DropdownComponent.builder("%createWorldScreen.gameMode.personal");
-            for (GameMode gamemode : GameMode.values()) {
-                gamemodeDropdown.option("selectWorld.gameMode." + gamemode.name().toLowerCase(), session.getGameMode() == gamemode);
-            }
-            builder.dropdown(gamemodeDropdown);
-
-            DropdownComponent.Builder difficultyDropdown = DropdownComponent.builder("%options.difficulty");
-            for (Difficulty difficulty : Difficulty.values()) {
-                difficultyDropdown.option("%options.difficulty." + difficulty.name().toLowerCase(), session.getWorldCache().getDifficulty() == difficulty);
-            }
-            builder.dropdown(difficultyDropdown);
         }
 
         boolean showGamerules = session.getOpPermissionLevel() >= 2 || session.hasPermission("geyser.settings.gamerules");
@@ -101,11 +85,7 @@ public class SettingsUtils {
                     .translator(MinecraftLocale::getLocaleString); // we need translate gamerules next
 
             WorldManager worldManager = GeyserImpl.getInstance().getWorldManager();
-            for (GameRule gamerule : GameRule.values()) {
-                if (gamerule.equals(GameRule.UNKNOWN)) {
-                    continue;
-                }
-
+            for (GameRule gamerule : GameRule.VALUES) {
                 // Add the relevant form item based on the gamerule type
                 if (Boolean.class.equals(gamerule.getType())) {
                     builder.toggle("gamerule." + gamerule.getJavaID(), worldManager.getGameRuleBool(session, gamerule));
@@ -115,47 +95,30 @@ public class SettingsUtils {
             }
         }
 
-        builder.responseHandler((form, responseData) -> {
-            CustomFormResponse response = form.parseResponse(responseData);
-            if (response.isClosed() || response.isInvalid()) {
-                return;
-            }
-
+        builder.validResultHandler((response) -> {
             if (showClientSettings) {
                 // Client can only see its coordinates if reducedDebugInfo is disabled and coordinates are enabled in geyser config.
-                if (session.getPreferencesCache().isAllowShowCoordinates()) {
-                    session.getPreferencesCache().setPrefersShowCoordinates(response.next());
-                    session.getPreferencesCache().updateShowCoordinates();
+                if (showCoordinates) {
+                    // In theory, a server could update the gamerule while the client is in the settings menu.
+                    // We need to still read the response to update the client's preference, but we don't want to update the gamerule.
+                    if (session.getPreferencesCache().isAllowShowCoordinates()) {
+                        session.getPreferencesCache().setPrefersShowCoordinates(response.next());
+                        session.getPreferencesCache().updateShowCoordinates();
+                    }
                 }
 
-                if (CooldownUtils.getDefaultShowCooldown() != CooldownUtils.CooldownType.DISABLED) {
+                if (cooldownShown) {
                     CooldownUtils.CooldownType cooldownType = CooldownUtils.CooldownType.VALUES[(int) response.next()];
                     session.getPreferencesCache().setCooldownPreference(cooldownType);
                 }
 
-                if (session.getGeyser().getConfig().isAllowCustomSkulls()) {
+                if (customSkulls) {
                     session.getPreferencesCache().setPrefersCustomSkulls(response.next());
-                }
-            }
-
-            if (canModifyServer) {
-                GameMode gameMode = GameMode.values()[(int) response.next()];
-                if (gameMode != null && gameMode != session.getGameMode()) {
-                    session.getGeyser().getWorldManager().setPlayerGameMode(session, gameMode);
-                }
-
-                Difficulty difficulty = Difficulty.values()[(int) response.next()];
-                if (difficulty != null && difficulty != session.getWorldCache().getDifficulty()) {
-                    session.getGeyser().getWorldManager().setDifficulty(session, difficulty);
                 }
             }
 
             if (showGamerules) {
                 for (GameRule gamerule : GameRule.VALUES) {
-                    if (gamerule.equals(GameRule.UNKNOWN)) {
-                        continue;
-                    }
-
                     if (Boolean.class.equals(gamerule.getType())) {
                         boolean value = response.next();
                         if (value != session.getGeyser().getWorldManager().getGameRuleBool(session, gamerule)) {
@@ -175,6 +138,10 @@ public class SettingsUtils {
     }
 
     private static String translateEntry(String key, String locale) {
+        if (key.startsWith("%")) {
+            // Bedrock will translate
+            return key;
+        }
         if (key.startsWith("geyser.")) {
             return GeyserLocale.getPlayerLocaleString(key, locale);
         }

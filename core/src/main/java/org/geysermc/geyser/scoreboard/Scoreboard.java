@@ -25,27 +25,35 @@
 
 package org.geysermc.geyser.scoreboard;
 
-import com.github.steveice10.mc.protocol.data.game.scoreboard.ScoreboardPosition;
-import com.nukkitx.protocol.bedrock.data.ScoreInfo;
-import com.nukkitx.protocol.bedrock.packet.RemoveObjectivePacket;
-import com.nukkitx.protocol.bedrock.packet.SetDisplayObjectivePacket;
-import com.nukkitx.protocol.bedrock.packet.SetScorePacket;
+import it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap;
 import lombok.Getter;
+import org.checkerframework.checker.nullness.qual.Nullable;
+import org.cloudburstmc.protocol.bedrock.data.ScoreInfo;
+import org.cloudburstmc.protocol.bedrock.data.command.CommandEnumConstraint;
+import org.cloudburstmc.protocol.bedrock.packet.RemoveObjectivePacket;
+import org.cloudburstmc.protocol.bedrock.packet.SetDisplayObjectivePacket;
+import org.cloudburstmc.protocol.bedrock.packet.SetScorePacket;
 import org.geysermc.geyser.GeyserImpl;
 import org.geysermc.geyser.GeyserLogger;
 import org.geysermc.geyser.entity.type.Entity;
 import org.geysermc.geyser.entity.type.player.PlayerEntity;
 import org.geysermc.geyser.session.GeyserSession;
 import org.geysermc.geyser.text.GeyserLocale;
+import org.geysermc.mcprotocollib.protocol.data.game.scoreboard.ScoreboardPosition;
+import org.jetbrains.annotations.Contract;
 
-import javax.annotation.Nullable;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
+import java.util.function.Function;
+import java.util.stream.Collectors;
 
 import static org.geysermc.geyser.scoreboard.UpdateType.*;
 
 public final class Scoreboard {
+    private static final boolean SHOW_SCOREBOARD_LOGS = Boolean.parseBoolean(System.getProperty("Geyser.ShowScoreboardLogs", "true"));
+    private static final boolean ADD_TEAM_SUGGESTIONS = Boolean.parseBoolean(System.getProperty("Geyser.AddTeamSuggestions", "true"));
+
     private final GeyserSession session;
     private final GeyserLogger logger;
     @Getter
@@ -55,6 +63,13 @@ public final class Scoreboard {
     @Getter
     private final Map<ScoreboardPosition, Objective> objectiveSlots = new EnumMap<>(ScoreboardPosition.class);
     private final Map<String, Team> teams = new ConcurrentHashMap<>(); // updated on multiple threads
+    /**
+     * Required to preserve vanilla behavior, which also uses a map.
+     * Otherwise, for example, if TAB has a team for a player and vanilla has a team, "race conditions" that do not
+     * match vanilla could occur.
+     */
+    @Getter
+    private final Map<String, Team> playerToTeam = new Object2ObjectOpenHashMap<>();
 
     private int lastAddScoreCount = 0;
     private int lastRemoveScoreCount = 0;
@@ -74,7 +89,7 @@ public final class Scoreboard {
         }
     }
 
-    public Objective registerNewObjective(String objectiveId) {
+    public @Nullable Objective registerNewObjective(String objectiveId) {
         Objective objective = objectives.get(objectiveId);
         if (objective != null) {
             // we have no other choice, or we have to make a new map?
@@ -125,13 +140,20 @@ public final class Scoreboard {
     public Team registerNewTeam(String teamName, String[] players) {
         Team team = teams.get(teamName);
         if (team != null) {
-            logger.info(GeyserLocale.getLocaleStringLog("geyser.network.translator.team.failed_overrides", teamName));
+            if (SHOW_SCOREBOARD_LOGS) {
+                logger.info(GeyserLocale.getLocaleStringLog("geyser.network.translator.team.failed_overrides", teamName));
+            }
             return team;
         }
 
         team = new Team(this, teamName);
         team.addEntities(players);
         teams.put(teamName, team);
+
+        // Update command parameters - is safe to send even if the command enum doesn't exist on the client (as of 1.19.51)
+        if (ADD_TEAM_SUGGESTIONS) {
+            session.addCommandEnum("Geyser_Teams", team.getId());
+        }
         return team;
     }
 
@@ -215,7 +237,7 @@ public final class Scoreboard {
                 boolean update = score.shouldUpdate();
 
                 if (update) {
-                    score.update(objective.getObjectiveName());
+                    score.update(objective);
                 }
 
                 if (score.getUpdateType() != REMOVE && update) {
@@ -233,7 +255,12 @@ public final class Scoreboard {
 
         for (Score score : objective.getScores().values()) {
             if (score.getUpdateType() == REMOVE) {
-                removeScores.add(score.getCachedInfo());
+                ScoreInfo cachedInfo = score.getCachedInfo();
+                // cachedInfo can be null here when ScoreboardUpdater is being used and a score is added and
+                // removed before a single update cycle is performed
+                if (cachedInfo != null) {
+                    removeScores.add(cachedInfo);
+                }
                 // score is pending to be removed, so we can remove it from the objective
                 objective.removeScore0(score.getName());
                 break;
@@ -251,7 +278,7 @@ public final class Scoreboard {
             }
 
             if (score.shouldUpdate()) {
-                score.update(objective.getObjectiveName());
+                score.update(objective);
                 add = true;
             }
 
@@ -328,12 +355,7 @@ public final class Scoreboard {
     }
 
     public Team getTeamFor(String entity) {
-        for (Team team : teams.values()) {
-            if (team.hasEntity(entity)) {
-                return team;
-            }
-        }
-        return null;
+        return playerToTeam.get(entity);
     }
 
     public void removeTeam(String teamName) {
@@ -343,7 +365,20 @@ public final class Scoreboard {
             // We need to use the direct entities list here, so #refreshSessionPlayerDisplays also updates accordingly
             // With the player's lack of a team in visibility checks
             updateEntityNames(remove, remove.getEntities(), true);
+            for (String name : remove.getEntities()) {
+                // 1.19.3 Mojmap Scoreboard#removePlayerTeam(PlayerTeam)
+                playerToTeam.remove(name);
+            }
+
+            session.removeCommandEnum("Geyser_Teams", remove.getId());
         }
+    }
+
+    @Contract("-> new")
+    public Map<String, Set<CommandEnumConstraint>> getTeamNames() {
+        return teams.keySet().stream()
+                .collect(Collectors.toMap(Function.identity(), o -> EnumSet.noneOf(CommandEnumConstraint.class),
+                        (o1, o2) -> o1, LinkedHashMap::new));
     }
 
     /**
@@ -368,7 +403,8 @@ public final class Scoreboard {
             for (Entity entity : session.getEntityCache().getEntities().values()) {
                 // This more complex logic is for the future to iterate over all entities, not just players
                 if (entity instanceof PlayerEntity player && names.remove(player.getUsername())) {
-                    player.updateDisplayName(team, true);
+                    player.updateDisplayName(team);
+                    player.updateBedrockMetadata();
                     if (names.isEmpty()) {
                         break;
                     }
@@ -384,7 +420,8 @@ public final class Scoreboard {
         for (Entity entity : session.getEntityCache().getEntities().values()) {
             if (entity instanceof PlayerEntity player) {
                 Team playerTeam = session.getWorldCache().getScoreboard().getTeamFor(player.getUsername());
-                player.updateDisplayName(playerTeam, true);
+                player.updateDisplayName(playerTeam);
+                player.updateBedrockMetadata();
             }
         }
     }

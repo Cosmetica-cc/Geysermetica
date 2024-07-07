@@ -25,23 +25,25 @@
 
 package org.geysermc.geyser.translator.protocol.java.inventory;
 
-import com.github.steveice10.mc.protocol.packet.ingame.clientbound.inventory.ClientboundHorseScreenOpenPacket;
-import com.nukkitx.nbt.NbtMap;
-import com.nukkitx.nbt.NbtMapBuilder;
-import com.nukkitx.nbt.NbtType;
-import com.nukkitx.protocol.bedrock.data.inventory.ContainerType;
-import com.nukkitx.protocol.bedrock.packet.UpdateEquipPacket;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.inventory.ClientboundHorseScreenOpenPacket;
+import org.cloudburstmc.nbt.NbtMap;
+import org.cloudburstmc.nbt.NbtMapBuilder;
+import org.cloudburstmc.nbt.NbtType;
+import org.cloudburstmc.protocol.bedrock.data.entity.EntityFlag;
+import org.cloudburstmc.protocol.bedrock.data.inventory.ContainerType;
+import org.cloudburstmc.protocol.bedrock.packet.UpdateEquipPacket;
 import org.geysermc.geyser.entity.type.Entity;
+import org.geysermc.geyser.entity.type.living.animal.horse.CamelEntity;
 import org.geysermc.geyser.entity.type.living.animal.horse.ChestedHorseEntity;
 import org.geysermc.geyser.entity.type.living.animal.horse.LlamaEntity;
 import org.geysermc.geyser.inventory.Container;
 import org.geysermc.geyser.session.GeyserSession;
-import org.geysermc.geyser.translator.protocol.PacketTranslator;
-import org.geysermc.geyser.translator.protocol.Translator;
 import org.geysermc.geyser.translator.inventory.InventoryTranslator;
 import org.geysermc.geyser.translator.inventory.horse.DonkeyInventoryTranslator;
 import org.geysermc.geyser.translator.inventory.horse.HorseInventoryTranslator;
 import org.geysermc.geyser.translator.inventory.horse.LlamaInventoryTranslator;
+import org.geysermc.geyser.translator.protocol.PacketTranslator;
+import org.geysermc.geyser.translator.protocol.Translator;
 import org.geysermc.geyser.util.InventoryUtils;
 
 import java.util.ArrayList;
@@ -111,15 +113,32 @@ public class JavaHorseScreenOpenTranslator extends PacketTranslator<ClientboundH
         NbtMapBuilder builder = NbtMap.builder();
         List<NbtMap> slots = new ArrayList<>();
 
+        // Since 1.20.5, the armor slot is not included in the container size,
+        // but everything is still indexed the same.
+        int slotCount = 2; // Don't depend on slot count sent from server
+
         InventoryTranslator inventoryTranslator;
-        if (entity instanceof LlamaEntity) {
-            inventoryTranslator = new LlamaInventoryTranslator(packet.getNumberOfSlots());
+        if (entity instanceof LlamaEntity llamaEntity) {
+            if (entity.getFlag(EntityFlag.CHESTED)) {
+                slotCount += llamaEntity.getStrength() * 3;
+            }
+            inventoryTranslator = new LlamaInventoryTranslator(slotCount);
             slots.add(CARPET_SLOT);
         } else if (entity instanceof ChestedHorseEntity) {
-            inventoryTranslator = new DonkeyInventoryTranslator(packet.getNumberOfSlots());
+            if (entity.getFlag(EntityFlag.CHESTED)) {
+                slotCount += 15;
+            }
+            inventoryTranslator = new DonkeyInventoryTranslator(slotCount);
+            slots.add(SADDLE_SLOT);
+        } else if (entity instanceof CamelEntity) {
+            if (entity.getFlag(EntityFlag.CHESTED)) {
+                slotCount += 15;
+            }
+            // The camel has an invisible armor slot and needs special handling, same as the donkey
+            inventoryTranslator = new DonkeyInventoryTranslator(slotCount);
             slots.add(SADDLE_SLOT);
         } else {
-            inventoryTranslator = new HorseInventoryTranslator(packet.getNumberOfSlots());
+            inventoryTranslator = new HorseInventoryTranslator(slotCount);
             slots.add(SADDLE_SLOT);
             slots.add(ARMOR_SLOT);
         }
@@ -131,6 +150,6 @@ public class JavaHorseScreenOpenTranslator extends PacketTranslator<ClientboundH
         session.sendUpstreamPacket(updateEquipPacket);
 
         session.setInventoryTranslator(inventoryTranslator);
-        InventoryUtils.openInventory(session, new Container(entity.getNametag(), packet.getContainerId(), packet.getNumberOfSlots(), null, session.getPlayerInventory()));
+        InventoryUtils.openInventory(session, new Container(entity.getNametag(), packet.getContainerId(), slotCount, null, session.getPlayerInventory()));
     }
 }

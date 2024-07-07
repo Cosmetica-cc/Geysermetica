@@ -38,19 +38,20 @@ import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.core.Appender;
 import org.apache.logging.log4j.core.Logger;
 import org.apache.logging.log4j.core.appender.ConsoleAppender;
-import org.geysermc.common.PlatformType;
-import org.geysermc.geyser.GeyserImpl;
+import org.checkerframework.checker.nullness.qual.NonNull;
 import org.geysermc.geyser.GeyserBootstrap;
-import org.geysermc.geyser.command.CommandManager;
+import org.geysermc.geyser.GeyserImpl;
+import org.geysermc.geyser.api.util.PlatformType;
+import org.geysermc.geyser.command.GeyserCommandManager;
 import org.geysermc.geyser.configuration.GeyserConfiguration;
 import org.geysermc.geyser.configuration.GeyserJacksonConfiguration;
 import org.geysermc.geyser.dump.BootstrapDumpInfo;
 import org.geysermc.geyser.ping.GeyserLegacyPingPassthrough;
 import org.geysermc.geyser.ping.IGeyserPingPassthrough;
-import org.geysermc.geyser.util.FileUtils;
-import org.geysermc.geyser.text.GeyserLocale;
-import org.geysermc.geyser.platform.standalone.command.GeyserCommandManager;
 import org.geysermc.geyser.platform.standalone.gui.GeyserStandaloneGUI;
+import org.geysermc.geyser.text.GeyserLocale;
+import org.geysermc.geyser.util.FileUtils;
+import org.geysermc.geyser.util.LoopbackUtil;
 
 import java.io.File;
 import java.io.IOException;
@@ -58,20 +59,24 @@ import java.lang.reflect.Method;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.text.MessageFormat;
-import java.util.*;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import java.util.Set;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 public class GeyserStandaloneBootstrap implements GeyserBootstrap {
 
     private GeyserCommandManager geyserCommandManager;
     private GeyserStandaloneConfiguration geyserConfig;
-    private GeyserStandaloneLogger geyserLogger;
+    private final GeyserStandaloneLogger geyserLogger = new GeyserStandaloneLogger();
     private IGeyserPingPassthrough geyserPingPassthrough;
-
     private GeyserStandaloneGUI gui;
-
     @Getter
     private boolean useGui = System.console() == null && !isHeadless();
+    private Logger log4jLogger;
     private String configFilename = "config.yml";
 
     private GeyserImpl geyser;
@@ -160,35 +165,35 @@ public class GeyserStandaloneBootstrap implements GeyserBootstrap {
                 }
             }
         }
-        bootstrap.onEnable(useGuiOpts, configFilenameOpt);
-    }
-
-    public void onEnable(boolean useGui, String configFilename) {
-        this.configFilename = configFilename;
-        this.useGui = useGui;
-        this.onEnable();
+        bootstrap.useGui = useGuiOpts;
+        bootstrap.configFilename = configFilenameOpt;
+        bootstrap.onGeyserInitialize();
     }
 
     @Override
-    public void onEnable() {
-        Logger logger = (Logger) LogManager.getRootLogger();
-        for (Appender appender : logger.getAppenders().values()) {
+    public void onGeyserInitialize() {
+        log4jLogger = (Logger) LogManager.getRootLogger();
+        for (Appender appender : log4jLogger.getAppenders().values()) {
             // Remove the appender that is not in use
             // Prevents multiple appenders/double logging and removes harmless errors
             if ((useGui && appender instanceof TerminalConsoleAppender) || (!useGui && appender instanceof ConsoleAppender)) {
-                logger.removeAppender(appender);
+                log4jLogger.removeAppender(appender);
             }
         }
+
         if (useGui && gui == null) {
-            gui = new GeyserStandaloneGUI();
+            gui = new GeyserStandaloneGUI(geyserLogger);
             gui.redirectSystemStreams();
             gui.startUpdateThread();
         }
 
-        geyserLogger = new GeyserStandaloneLogger();
+        LoopbackUtil.checkAndApplyLoopback(geyserLogger);
 
-        LoopbackUtil.checkLoopback(geyserLogger);
-        
+        this.onGeyserEnable();
+    }
+
+    @Override
+    public void onGeyserEnable() {
         try {
             File configFile = FileUtils.fileOrCopiedFromResource(new File(configFilename), "config.yml",
                     (x) -> x.replaceAll("generateduuid", UUID.randomUUID().toString()), this);
@@ -196,7 +201,7 @@ public class GeyserStandaloneBootstrap implements GeyserBootstrap {
 
             handleArgsConfigOptions();
 
-            if (this.geyserConfig.getRemote().getAddress().equalsIgnoreCase("auto")) {
+            if (this.geyserConfig.getRemote().address().equalsIgnoreCase("auto")) {
                 geyserConfig.setAutoconfiguredRemote(true); // Doesn't really need to be set but /shrug
                 geyserConfig.getRemote().setAddress("127.0.0.1");
             }
@@ -209,16 +214,21 @@ public class GeyserStandaloneBootstrap implements GeyserBootstrap {
                 return;
             }
         }
+        geyserLogger.setDebug(geyserConfig.isDebugMode());
         GeyserConfiguration.checkGeyserConfiguration(geyserConfig, geyserLogger);
 
         // Allow libraries like Protocol to have their debug information passthrough
-        logger.get().setLevel(geyserConfig.isDebugMode() ? Level.DEBUG : Level.INFO);
+        log4jLogger.get().setLevel(geyserConfig.isDebugMode() ? Level.DEBUG : Level.INFO);
 
-        geyser = GeyserImpl.start(PlatformType.STANDALONE, this);
+        geyser = GeyserImpl.load(PlatformType.STANDALONE, this);
+
         geyserCommandManager = new GeyserCommandManager(geyser);
+        geyserCommandManager.init();
+
+        GeyserImpl.start();
 
         if (gui != null) {
-            gui.setupInterface(geyserLogger, geyserCommandManager);
+            gui.enableCommands(geyser.getScheduledThread(), geyserCommandManager);
         }
 
         geyserPingPassthrough = GeyserLegacyPingPassthrough.init(geyser);
@@ -244,7 +254,14 @@ public class GeyserStandaloneBootstrap implements GeyserBootstrap {
     }
 
     @Override
-    public void onDisable() {
+    public void onGeyserDisable() {
+        // We can re-register commands on standalone, so why not
+        GeyserImpl.getInstance().commandManager().getCommands().clear();
+        geyser.disable();
+    }
+
+    @Override
+    public void onGeyserShutdown() {
         geyser.shutdown();
         System.exit(0);
     }
@@ -260,7 +277,7 @@ public class GeyserStandaloneBootstrap implements GeyserBootstrap {
     }
 
     @Override
-    public CommandManager getGeyserCommandManager() {
+    public GeyserCommandManager getGeyserCommandManager() {
         return geyserCommandManager;
     }
 
@@ -286,6 +303,22 @@ public class GeyserStandaloneBootstrap implements GeyserBootstrap {
         return new GeyserStandaloneDumpInfo(this);
     }
 
+    @NonNull
+    @Override
+    public String getServerBindAddress() {
+        throw new IllegalStateException();
+    }
+
+    @Override
+    public int getServerPort() {
+        throw new IllegalStateException();
+    }
+
+    @Override
+    public boolean testFloodgatePluginPresent() {
+        return false;
+    }
+
     /**
      * Get the {@link BeanPropertyDefinition}s for the given class
      *
@@ -303,7 +336,7 @@ public class GeyserStandaloneBootstrap implements GeyserBootstrap {
 
         // Get the ignored properties
         Set<String> ignoredProperties = OBJECT_MAPPER.getSerializationConfig().getAnnotationIntrospector()
-                .findPropertyIgnorals(beanDescription.getClassInfo()).getIgnored();
+                .findPropertyIgnoralByName(OBJECT_MAPPER.getSerializationConfig() ,beanDescription.getClassInfo()).getIgnored();
 
         // Filter properties removing the ignored ones
         return properties.stream()
@@ -318,7 +351,7 @@ public class GeyserStandaloneBootstrap implements GeyserBootstrap {
      * @param parentObject The object to alter
      * @param value The new value of the property
      */
-    @SuppressWarnings("unchecked") // Required for enum usage
+    @SuppressWarnings({"unchecked", "rawtypes"}) // Required for enum usage
     private static void setConfigOption(BeanPropertyDefinition property, Object parentObject, Object value) {
         Object parsedValue = value;
 

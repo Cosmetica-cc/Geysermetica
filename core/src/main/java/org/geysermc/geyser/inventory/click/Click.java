@@ -25,9 +25,7 @@
 
 package org.geysermc.geyser.inventory.click;
 
-import com.github.steveice10.mc.protocol.data.game.inventory.ClickItemAction;
-import com.github.steveice10.mc.protocol.data.game.inventory.ContainerActionType;
-import com.github.steveice10.mc.protocol.data.game.inventory.*;
+import org.geysermc.mcprotocollib.protocol.data.game.inventory.*;
 import lombok.AllArgsConstructor;
 
 @AllArgsConstructor

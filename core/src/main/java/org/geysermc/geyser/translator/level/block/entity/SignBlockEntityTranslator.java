@@ -25,12 +25,17 @@
 
 package org.geysermc.geyser.translator.level.block.entity;
 
-import com.github.steveice10.mc.protocol.data.game.level.block.BlockEntityType;
-import com.github.steveice10.opennbt.tag.builtin.CompoundTag;
-import com.github.steveice10.opennbt.tag.builtin.Tag;
-import com.nukkitx.nbt.NbtMapBuilder;
+import org.cloudburstmc.nbt.NbtMap;
+import org.cloudburstmc.nbt.NbtMapBuilder;
+import org.cloudburstmc.nbt.NbtType;
+import org.geysermc.geyser.level.block.type.BlockState;
+import org.geysermc.geyser.session.GeyserSession;
+import org.geysermc.geyser.text.ChatColor;
 import org.geysermc.geyser.translator.text.MessageTranslator;
 import org.geysermc.geyser.util.SignUtils;
+import org.geysermc.mcprotocollib.protocol.data.game.level.block.BlockEntityType;
+
+import java.util.List;
 
 @BlockEntity(type = BlockEntityType.SIGN)
 public class SignBlockEntityTranslator extends BlockEntityTranslator {
@@ -64,53 +69,76 @@ public class SignBlockEntityTranslator extends BlockEntityTranslator {
         return dyeColor | (255 << 24);
     }
 
-    @Override
-    public void translateTag(NbtMapBuilder builder, CompoundTag tag, int blockState) {
-        StringBuilder signText = new StringBuilder();
-        for (int i = 0; i < 4; i++) {
-            int currentLine = i + 1;
-            String signLine = getOrDefault(tag.getValue().get("Text" + currentLine), "");
-            signLine = MessageTranslator.convertMessageLenient(signLine);
+    public int signWidthMax() {
+        return SignUtils.SIGN_WIDTH_MAX;
+    }
 
-            // Check the character width on the sign to ensure there is no overflow that is usually hidden
-            // to Java Edition clients but will appear to Bedrock clients
-            int signWidth = 0;
-            StringBuilder finalSignLine = new StringBuilder();
-            boolean previousCharacterWasFormatting = false; // Color changes do not count for maximum width
-            for (char c : signLine.toCharArray()) {
-                if (c == '\u00a7') {
-                    // Don't count this character
-                    previousCharacterWasFormatting = true;
-                } else if (previousCharacterWasFormatting) {
-                    // Don't count this character either
-                    previousCharacterWasFormatting = false;
-                } else {
-                    signWidth += SignUtils.getCharacterWidth(c);
+    @Override
+    public void translateTag(GeyserSession session, NbtMapBuilder bedrockNbt, NbtMap javaNbt, BlockState blockState) {
+        bedrockNbt.putCompound("FrontText", translateSide(javaNbt.getCompound("front_text")));
+        bedrockNbt.putCompound("BackText", translateSide(javaNbt.getCompound("back_text")));
+        bedrockNbt.putBoolean("IsWaxed", javaNbt.getBoolean("is_waxed"));
+    }
+
+    private NbtMap translateSide(NbtMap javaNbt) {
+        NbtMapBuilder builder = NbtMap.builder();
+
+        StringBuilder signText = new StringBuilder();
+        List<String> messages = javaNbt.getList("messages", NbtType.STRING);
+        if (!messages.isEmpty()) {
+            var it = messages.iterator();
+            while (it.hasNext()) {
+                String signLine = it.next();
+                signLine = MessageTranslator.convertMessageLenient(signLine);
+
+                // Check the character width on the sign to ensure there is no overflow that is usually hidden
+                // to Java Edition clients but will appear to Bedrock clients
+                int signWidth = 0;
+                StringBuilder finalSignLine = new StringBuilder();
+                boolean previousCharacterWasFormatting = false; // Color changes do not count for maximum width
+                for (char c : signLine.toCharArray()) {
+                    if (c == ChatColor.ESCAPE) {
+                        // Don't count this character
+                        previousCharacterWasFormatting = true;
+                    } else if (previousCharacterWasFormatting) {
+                        // Don't count this character either
+                        previousCharacterWasFormatting = false;
+                    } else {
+                        signWidth += SignUtils.getCharacterWidth(c);
+                    }
+
+                    if (signWidth <= signWidthMax()) {
+                        finalSignLine.append(c);
+                    } else {
+                        // Adding the character would make Bedrock move to the next line - Java doesn't do that, so we do not want to
+                        break;
+                    }
                 }
 
-                if (signWidth <= SignUtils.BEDROCK_CHARACTER_WIDTH_MAX) {
-                    finalSignLine.append(c);
-                } else {
-                    // Adding the character would make Bedrock move to the next line - Java doesn't do that, so we do not want to
-                    break;
+                signText.append(finalSignLine);
+                if (it.hasNext()) {
+                    signText.append("\n");
                 }
             }
+        }
 
-            signText.append(finalSignLine);
-            signText.append("\n");
+        // Trim extra newlines - this makes editing difficult if preserved because the cursor starts at the bottom,
+        // Which can easily go over the screen
+        while (!signText.isEmpty() && signText.charAt(signText.length() - 1) == '\n') {
+            signText.deleteCharAt(signText.length() - 1);
         }
 
         builder.putString("Text", signText.toString());
 
         // Java Edition 1.14 added the ability to change the text color of the whole sign using dye
-        Tag color = tag.get("Color");
+        String color = javaNbt.getString("color", null);
         if (color != null) {
-            builder.putInt("SignTextColor", getBedrockSignColor(color.getValue().toString()));
+            builder.putInt("SignTextColor", getBedrockSignColor(color));
         }
 
         // Glowing text
-        boolean isGlowing = getOrDefault(tag.getValue().get("GlowingText"), (byte) 0) != (byte) 0;
+        boolean isGlowing = javaNbt.getBoolean("has_glowing_text");
         builder.putBoolean("IgnoreLighting", isGlowing);
-        builder.putBoolean("TextIgnoreLegacyBugResolved", isGlowing); // ??? required
+        return builder.build();
     }
 }

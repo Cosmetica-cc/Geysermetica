@@ -28,27 +28,28 @@ package org.geysermc.geyser.skin;
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import lombok.Getter;
+import org.geysermc.floodgate.pluginmessage.PluginMessageChannels;
+import org.geysermc.floodgate.util.WebsocketEventType;
+import org.geysermc.geyser.Constants;
 import org.geysermc.geyser.GeyserImpl;
 import org.geysermc.geyser.GeyserLogger;
 import org.geysermc.geyser.session.GeyserSession;
-import org.geysermc.geyser.Constants;
 import org.geysermc.geyser.util.PluginMessageUtils;
-import org.geysermc.floodgate.util.WebsocketEventType;
 import org.java_websocket.client.WebSocketClient;
 import org.java_websocket.handshake.ServerHandshake;
 
 import javax.net.ssl.SSLException;
 import java.net.ConnectException;
+import java.net.UnknownHostException;
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Iterator;
 import java.util.List;
 import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
-
-import static org.geysermc.geyser.util.PluginMessageUtils.getSkinChannel;
 
 public final class FloodgateSkinUploader {
     private final ObjectMapper JACKSON = new ObjectMapper();
@@ -115,7 +116,7 @@ public final class FloodgateSkinUploader {
 
                             if (session != null) {
                                 if (!node.get("success").asBoolean()) {
-                                    logger.info("Failed to upload skin for " + session.name());
+                                    logger.info("Failed to upload skin for " + session.bedrockUsername());
                                     return;
                                 }
 
@@ -126,7 +127,7 @@ public final class FloodgateSkinUploader {
 
                                 byte[] bytes = (value + '\0' + signature)
                                         .getBytes(StandardCharsets.UTF_8);
-                                PluginMessageUtils.sendMessage(session, getSkinChannel(), bytes);
+                                PluginMessageUtils.sendMessage(session, PluginMessageChannels.SKIN, bytes);
                             }
                             break;
                         case LOG_MESSAGE:
@@ -174,6 +175,10 @@ public final class FloodgateSkinUploader {
 
             @Override
             public void onError(Exception ex) {
+                if (ex instanceof UnknownHostException) {
+                    logger.error("Unable to resolve the skin api! This can be caused by your connection or the skin api being unreachable. " + ex.getMessage());
+                    return;
+                }
                 if (ex instanceof ConnectException || ex instanceof SSLException) {
                     if (logger.isDebug()) {
                         logger.error("[debug] Got an error", ex);
@@ -185,13 +190,15 @@ public final class FloodgateSkinUploader {
         };
     }
 
-    public void uploadSkin(JsonNode chainData, String clientData) {
-        if (chainData == null || !chainData.isArray() || clientData == null) {
+    public void uploadSkin(List<String> chainData, String clientData) {
+        if (chainData == null || clientData == null) {
             return;
         }
 
         ObjectNode node = JACKSON.createObjectNode();
-        node.set("chain_data", chainData);
+        ArrayNode chainDataNode = JACKSON.createArrayNode();
+        chainData.forEach(chainDataNode::add);
+        node.set("chain_data", chainDataNode);
         node.put("client_data", clientData);
 
         // The reason why I don't like Jackson

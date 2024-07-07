@@ -25,16 +25,17 @@
 
 package org.geysermc.geyser.util;
 
-import com.nukkitx.protocol.bedrock.packet.SetTitlePacket;
 import lombok.Getter;
+import org.cloudburstmc.protocol.bedrock.packet.SetTitlePacket;
 import org.geysermc.geyser.session.GeyserSession;
 import org.geysermc.geyser.session.cache.PreferencesCache;
+import org.geysermc.geyser.text.ChatColor;
 
 import java.util.concurrent.TimeUnit;
 
 /**
  * Manages the sending of a cooldown indicator to the Bedrock player as there is no cooldown indicator in Bedrock.
- * Much of the work here is from the wonderful folks from ViaRewind: https://github.com/ViaVersion/ViaRewind
+ * Much of the work here is from the wonderful folks from <a href="https://github.com/ViaVersion/ViaRewind">ViaRewind</a>
  */
 public class CooldownUtils {
     private static CooldownType DEFAULT_SHOW_COOLDOWN;
@@ -57,8 +58,19 @@ public class CooldownUtils {
         if (sessionPreference == CooldownType.DISABLED) return;
 
         if (session.getAttackSpeed() == 0.0 || session.getAttackSpeed() > 20) return; // 0.0 usually happens on login and causes issues with visuals; anything above 20 means a plugin like OldCombatMechanics is being used
-        // Needs to be sent or no subtitle packet is recognized by the client
+        // Set the times to stay a bit with no fade in nor out
         SetTitlePacket titlePacket = new SetTitlePacket();
+        titlePacket.setType(SetTitlePacket.Type.TIMES);
+        titlePacket.setStayTime(1000);
+        titlePacket.setText("");
+        titlePacket.setXuid("");
+        titlePacket.setPlatformOnlineId("");
+        session.sendUpstreamPacket(titlePacket);
+
+        session.getWorldCache().markTitleTimesAsIncorrect();
+
+        // Needs to be sent or no subtitle packet is recognized by the client
+        titlePacket = new SetTitlePacket();
         titlePacket.setType(SetTitlePacket.Type.TITLE);
         titlePacket.setText(" ");
         titlePacket.setXuid("");
@@ -85,9 +97,6 @@ public class CooldownUtils {
             titlePacket.setType(SetTitlePacket.Type.SUBTITLE);
         }
         titlePacket.setText(getTitle(session));
-        titlePacket.setFadeInTime(0);
-        titlePacket.setFadeOutTime(5);
-        titlePacket.setStayTime(2);
         titlePacket.setXuid("");
         titlePacket.setPlatformOnlineId("");
         session.sendUpstreamPacket(titlePacket);
@@ -96,11 +105,7 @@ public class CooldownUtils {
                     computeCooldown(session, sessionPreference, lastHitTime), 50, TimeUnit.MILLISECONDS); // Updated per tick. 1000 divided by 20 ticks equals 50
         } else {
             SetTitlePacket removeTitlePacket = new SetTitlePacket();
-            if (sessionPreference == CooldownType.ACTIONBAR) {
-                removeTitlePacket.setType(SetTitlePacket.Type.ACTIONBAR);
-            } else {
-                removeTitlePacket.setType(SetTitlePacket.Type.SUBTITLE);
-            }
+            removeTitlePacket.setType(SetTitlePacket.Type.CLEAR);
             removeTitlePacket.setText(" ");
             removeTitlePacket.setXuid("");
             removeTitlePacket.setPlatformOnlineId("");
@@ -127,12 +132,12 @@ public class CooldownUtils {
 
         int darkGrey = (int) Math.floor(10d * cooldown);
         int grey = 10 - darkGrey;
-        StringBuilder builder = new StringBuilder("§8");
+        StringBuilder builder = new StringBuilder(ChatColor.DARK_GRAY);
         while (darkGrey > 0) {
             builder.append("˙");
             darkGrey--;
         }
-        builder.append("§7");
+        builder.append(ChatColor.GRAY);
         while (grey > 0) {
             builder.append("˙");
             grey--;

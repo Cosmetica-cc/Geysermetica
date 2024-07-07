@@ -25,14 +25,16 @@
 
 package org.geysermc.geyser.entity.type.living;
 
-import com.nukkitx.math.vector.Vector3f;
+import org.checkerframework.checker.nullness.qual.NonNull;
+import org.cloudburstmc.math.vector.Vector3f;
 import org.geysermc.geyser.entity.EntityDefinition;
 import org.geysermc.geyser.inventory.GeyserItemStack;
 import org.geysermc.geyser.session.GeyserSession;
+import org.geysermc.geyser.session.cache.tags.ItemTag;
 import org.geysermc.geyser.util.InteractionResult;
 import org.geysermc.geyser.util.InteractiveTag;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.player.Hand;
 
-import javax.annotation.Nonnull;
 import java.util.UUID;
 
 public class DolphinEntity extends WaterEntity {
@@ -41,26 +43,26 @@ public class DolphinEntity extends WaterEntity {
     }
 
     @Override
-    protected boolean canBeLeashed() {
+    public boolean canBeLeashed() {
         return true;
     }
 
-    @Nonnull
+    @NonNull
     @Override
-    protected InteractiveTag testMobInteraction(@Nonnull GeyserItemStack itemInHand) {
-        if (!itemInHand.isEmpty() && session.getTagCache().isFish(itemInHand)) {
+    protected InteractiveTag testMobInteraction(@NonNull Hand hand, @NonNull GeyserItemStack itemInHand) {
+        if (!itemInHand.isEmpty() && session.getTagCache().is(ItemTag.FISHES, itemInHand)) {
             return InteractiveTag.FEED;
         }
-        return super.testMobInteraction(itemInHand);
+        return super.testMobInteraction(hand, itemInHand);
     }
 
-    @Nonnull
+    @NonNull
     @Override
-    protected InteractionResult mobInteract(@Nonnull GeyserItemStack itemInHand) {
-        if (!itemInHand.isEmpty() && session.getTagCache().isFish(itemInHand)) {
+    protected InteractionResult mobInteract(@NonNull Hand hand, @NonNull GeyserItemStack itemInHand) {
+        if (!itemInHand.isEmpty() && session.getTagCache().is(ItemTag.FISHES, itemInHand)) {
             // Feed
             return InteractionResult.SUCCESS;
         }
-        return super.mobInteract(itemInHand);
+        return super.mobInteract(hand, itemInHand);
     }
 }

@@ -85,27 +85,29 @@ public class EntityCache {
         return false;
     }
 
-    public boolean removeEntity(Entity entity, boolean force) {
+    public void removeEntity(Entity entity) {
         if (entity instanceof PlayerEntity player) {
             session.getPlayerWithCustomHeads().remove(player.getUuid());
         }
 
-        if (entity != null && entity.isValid() && (force || entity.despawnEntity())) {
+        if (entity != null) {
+            if (entity.isValid()) {
+                entity.despawnEntity();
+            }
+
             long geyserId = entityIdTranslations.remove(entity.getEntityId());
             entities.remove(geyserId);
 
             if (entity instanceof Tickable) {
                 tickableEntities.remove(entity);
             }
-            return true;
         }
-        return false;
     }
 
     public void removeAllEntities() {
         List<Entity> entities = new ArrayList<>(this.entities.values());
         for (Entity entity : entities) {
-            removeEntity(entity, false);
+            removeEntity(entity);
         }
 
         session.getPlayerWithCustomHeads().clear();
@@ -123,7 +125,8 @@ public class EntityCache {
     }
 
     public void addPlayerEntity(PlayerEntity entity) {
-        playerEntities.put(entity.getUuid(), entity);
+        // putIfAbsent matches the behavior of playerInfoMap in Java as of 1.19.3
+        playerEntities.putIfAbsent(entity.getUuid(), entity);
     }
 
     public PlayerEntity getPlayerEntity(UUID uuid) {
@@ -160,5 +163,10 @@ public class EntityCache {
 
     public List<Tickable> getTickableEntities() {
         return tickableEntities;
+    }
+
+    public void removeAllBossBars() {
+        bossBars.values().forEach(BossBar::removeBossBar);
+        bossBars.clear();
     }
 }

@@ -26,7 +26,6 @@
 package org.geysermc.geyser;
 
 import org.geysermc.geyser.configuration.GeyserJacksonConfiguration;
-import org.geysermc.geyser.session.auth.AuthType;
 import org.geysermc.geyser.text.GeyserLocale;
 
 import java.nio.file.Files;
@@ -34,16 +33,12 @@ import java.nio.file.Path;
 
 public class FloodgateKeyLoader {
     public static Path getKeyPath(GeyserJacksonConfiguration config, Path floodgateDataFolder, Path geyserDataFolder, GeyserLogger logger) {
-        if (config.getRemote().getAuthType() != AuthType.FLOODGATE) {
-            return geyserDataFolder.resolve(config.getFloodgateKeyFile());
-        }
-
         // Always prioritize Floodgate's key, if it is installed.
         // This mostly prevents people from trying to copy the key and corrupting it in the process
         if (floodgateDataFolder != null) {
             Path autoKey = floodgateDataFolder.resolve("key.pem");
             if (Files.exists(autoKey)) {
-                logger.info(GeyserLocale.getLocaleStringLog("geyser.bootstrap.floodgate.auto_loaded"));
+                logger.debug(GeyserLocale.getLocaleStringLog("geyser.bootstrap.floodgate.auto_loaded"));
                 return autoKey;
             } else {
                 logger.error(GeyserLocale.getLocaleStringLog("geyser.bootstrap.floodgate.missing_key"));
@@ -52,7 +47,7 @@ public class FloodgateKeyLoader {
 
         Path floodgateKey;
         if (config.getFloodgateKeyFile().equals("public-key.pem")) {
-            logger.info("Floodgate 2.0 doesn't use a public/private key system anymore. We'll search for key.pem instead");
+            logger.debug("Floodgate 2.0 doesn't use a public/private key system anymore. We'll search for key.pem instead");
             floodgateKey = geyserDataFolder.resolve("key.pem");
         } else {
             floodgateKey = geyserDataFolder.resolve(config.getFloodgateKeyFile());

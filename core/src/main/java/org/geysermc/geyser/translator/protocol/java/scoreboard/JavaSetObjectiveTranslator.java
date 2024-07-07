@@ -25,21 +25,21 @@
 
 package org.geysermc.geyser.translator.protocol.java.scoreboard;
 
-import com.github.steveice10.mc.protocol.data.game.scoreboard.ObjectiveAction;
-import com.github.steveice10.mc.protocol.data.game.scoreboard.ScoreboardPosition;
-import com.github.steveice10.mc.protocol.packet.ingame.clientbound.scoreboard.ClientboundSetObjectivePacket;
+import org.geysermc.mcprotocollib.protocol.data.game.scoreboard.ObjectiveAction;
+import org.geysermc.mcprotocollib.protocol.data.game.scoreboard.ScoreboardPosition;
+import org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.scoreboard.ClientboundSetObjectivePacket;
 import org.geysermc.geyser.GeyserImpl;
 import org.geysermc.geyser.GeyserLogger;
 import org.geysermc.geyser.entity.type.player.PlayerEntity;
+import org.geysermc.geyser.scoreboard.Objective;
+import org.geysermc.geyser.scoreboard.Scoreboard;
+import org.geysermc.geyser.scoreboard.ScoreboardUpdater;
+import org.geysermc.geyser.scoreboard.UpdateType;
 import org.geysermc.geyser.session.GeyserSession;
 import org.geysermc.geyser.session.cache.WorldCache;
 import org.geysermc.geyser.translator.protocol.PacketTranslator;
 import org.geysermc.geyser.translator.protocol.Translator;
 import org.geysermc.geyser.translator.text.MessageTranslator;
-import org.geysermc.geyser.scoreboard.Objective;
-import org.geysermc.geyser.scoreboard.Scoreboard;
-import org.geysermc.geyser.scoreboard.ScoreboardUpdater;
-import org.geysermc.geyser.scoreboard.UpdateType;
 
 @Translator(packet = ClientboundSetObjectivePacket.class)
 public class JavaSetObjectiveTranslator extends PacketTranslator<ClientboundSetObjectivePacket> {
@@ -63,8 +63,19 @@ public class JavaSetObjectiveTranslator extends PacketTranslator<ClientboundSetO
         }
 
         switch (packet.getAction()) {
-            case ADD, UPDATE -> objective.setDisplayName(MessageTranslator.convertMessage(packet.getDisplayName()))
-                    .setType(packet.getType().ordinal());
+            case ADD, UPDATE -> {
+                objective.setDisplayName(MessageTranslator.convertMessage(packet.getDisplayName()))
+                        .setNumberFormat(packet.getNumberFormat())
+                        .setType(packet.getType().ordinal());
+                if (objective == scoreboard.getObjectiveSlots().get(ScoreboardPosition.BELOW_NAME)) {
+                    // Update the score tag of all players
+                    for (PlayerEntity entity : session.getEntityCache().getAllPlayerEntities()) {
+                        if (entity.isValid()) {
+                            entity.setBelowNameText(objective);
+                        }
+                    }
+                }
+            }
             case REMOVE -> {
                 scoreboard.unregisterObjective(packet.getName());
                 if (objective != null && objective == scoreboard.getObjectiveSlots().get(ScoreboardPosition.BELOW_NAME)) {

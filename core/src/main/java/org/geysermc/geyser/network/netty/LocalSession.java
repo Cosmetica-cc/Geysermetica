@@ -25,18 +25,25 @@
 
 package org.geysermc.geyser.network.netty;
 
-import com.github.steveice10.packetlib.BuiltinFlags;
-import com.github.steveice10.packetlib.packet.PacketProtocol;
-import com.github.steveice10.packetlib.tcp.*;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.buffer.ByteBufAllocator;
 import io.netty.channel.*;
 import io.netty.channel.unix.PreferredDirectByteBufAllocator;
 import io.netty.handler.codec.haproxy.*;
+import io.netty.util.concurrent.DefaultThreadFactory;
+import org.checkerframework.checker.nullness.qual.NonNull;
+import org.geysermc.mcprotocollib.network.BuiltinFlags;
+import org.geysermc.mcprotocollib.network.codec.PacketCodecHelper;
+import org.geysermc.mcprotocollib.network.packet.PacketProtocol;
+import org.geysermc.mcprotocollib.network.tcp.TcpPacketCodec;
+import org.geysermc.mcprotocollib.network.tcp.TcpPacketSizer;
+import org.geysermc.mcprotocollib.network.tcp.TcpSession;
+import org.geysermc.mcprotocollib.protocol.codec.MinecraftCodecHelper;
 
 import java.net.Inet4Address;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
+import java.util.concurrent.TimeUnit;
 
 /**
  * Manages a Minecraft Java session over our LocalChannel implementations.
@@ -47,21 +54,25 @@ public final class LocalSession extends TcpSession {
 
     private final SocketAddress targetAddress;
     private final String clientIp;
+    private final PacketCodecHelper codecHelper;
 
-    public LocalSession(String host, int port, SocketAddress targetAddress, String clientIp, PacketProtocol protocol) {
+    public LocalSession(String host, int port, SocketAddress targetAddress, String clientIp, PacketProtocol protocol, MinecraftCodecHelper codecHelper) {
         super(host, port, protocol);
         this.targetAddress = targetAddress;
         this.clientIp = clientIp;
+        this.codecHelper = codecHelper;
     }
 
     @Override
-    public void connect() {
+    public void connect(boolean wait, boolean transferring) {
         if (this.disconnected) {
             throw new IllegalStateException("Connection has already been disconnected.");
         }
 
         if (DEFAULT_EVENT_LOOP_GROUP == null) {
-            DEFAULT_EVENT_LOOP_GROUP = new DefaultEventLoopGroup();
+            DEFAULT_EVENT_LOOP_GROUP = new DefaultEventLoopGroup(new DefaultThreadFactory(this.getClass(), true));
+            Runtime.getRuntime().addShutdownHook(new Thread(
+                    () -> DEFAULT_EVENT_LOOP_GROUP.shutdownGracefully(100, 500, TimeUnit.MILLISECONDS)));
         }
 
         try {
@@ -69,10 +80,10 @@ public final class LocalSession extends TcpSession {
             bootstrap.channel(LocalChannelWithRemoteAddress.class);
             bootstrap.handler(new ChannelInitializer<LocalChannelWithRemoteAddress>() {
                 @Override
-                public void initChannel(LocalChannelWithRemoteAddress channel) {
+                public void initChannel(@NonNull LocalChannelWithRemoteAddress channel) {
                     channel.spoofedRemoteAddress(new InetSocketAddress(clientIp, 0));
                     PacketProtocol protocol = getPacketProtocol();
-                    protocol.newClientSession(LocalSession.this);
+                    protocol.newClientSession(LocalSession.this, transferring);
 
                     refreshReadTimeoutHandler(channel);
                     refreshWriteTimeoutHandler(channel);
@@ -102,13 +113,18 @@ public final class LocalSession extends TcpSession {
         }
     }
 
+    @Override
+    public MinecraftCodecHelper getCodecHelper() {
+        return (MinecraftCodecHelper) this.codecHelper;
+    }
+
     // TODO duplicate code
     private void addHAProxySupport(ChannelPipeline pipeline) {
         InetSocketAddress clientAddress = getFlag(BuiltinFlags.CLIENT_PROXIED_ADDRESS);
         if (getFlag(BuiltinFlags.ENABLE_CLIENT_PROXY_PROTOCOL, false) && clientAddress != null) {
             pipeline.addFirst("proxy-protocol-packet-sender", new ChannelInboundHandlerAdapter() {
                 @Override
-                public void channelActive(ChannelHandlerContext ctx) throws Exception {
+                public void channelActive(@NonNull ChannelHandlerContext ctx) throws Exception {
                     HAProxyProxiedProtocol proxiedProtocol = clientAddress.getAddress() instanceof Inet4Address ? HAProxyProxiedProtocol.TCP4 : HAProxyProxiedProtocol.TCP6;
                     InetSocketAddress remoteAddress;
                     if (ctx.channel().remoteAddress() instanceof InetSocketAddress) {

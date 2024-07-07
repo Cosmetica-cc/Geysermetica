@@ -25,7 +25,7 @@
 
 package org.geysermc.geyser.session.cache;
 
-import com.nukkitx.math.vector.Vector3d;
+import org.cloudburstmc.math.vector.Vector3d;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 
@@ -33,7 +33,7 @@ import lombok.RequiredArgsConstructor;
  * Represents a teleport ID and corresponding coordinates that need to be confirmed. <br>
  *
  * The vanilla Java client, after getting a
- * {@link com.github.steveice10.mc.protocol.packet.ingame.clientbound.entity.player.ClientboundPlayerPositionPacket},
+ * {@link org.geysermc.mcprotocollib.protocol.packet.ingame.clientbound.entity.player.ClientboundPlayerPositionPacket},
  * adjusts the player's positions and immediately sends a teleport back. However, we want to acknowledge that the
  * Bedrock player actually moves close to that point, so we store the teleport until we get a movement packet from
  * Bedrock that the teleport was successful.

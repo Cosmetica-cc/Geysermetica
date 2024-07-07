@@ -25,19 +25,21 @@
 
 package org.geysermc.geyser.entity.type.living.animal;
 
-import com.github.steveice10.mc.protocol.data.game.entity.metadata.type.BooleanEntityMetadata;
-import com.nukkitx.math.vector.Vector3f;
-import com.nukkitx.protocol.bedrock.data.entity.EntityFlag;
-import org.geysermc.geyser.entity.type.Entity;
+import org.checkerframework.checker.nullness.qual.NonNull;
+import org.checkerframework.checker.nullness.qual.Nullable;
+import org.cloudburstmc.math.vector.Vector3f;
+import org.cloudburstmc.protocol.bedrock.data.entity.EntityFlag;
 import org.geysermc.geyser.entity.EntityDefinition;
+import org.geysermc.geyser.entity.type.Entity;
 import org.geysermc.geyser.inventory.GeyserItemStack;
 import org.geysermc.geyser.session.GeyserSession;
-import org.geysermc.geyser.registry.type.ItemMapping;
+import org.geysermc.geyser.session.cache.tags.ItemTag;
 import org.geysermc.geyser.util.EntityUtils;
 import org.geysermc.geyser.util.InteractionResult;
 import org.geysermc.geyser.util.InteractiveTag;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.metadata.type.BooleanEntityMetadata;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.player.Hand;
 
-import javax.annotation.Nonnull;
 import java.util.UUID;
 
 public class StriderEntity extends AnimalEntity {
@@ -92,39 +94,40 @@ public class StriderEntity extends AnimalEntity {
     }
 
     @Override
-    public boolean canEat(String javaIdentifierStripped, ItemMapping mapping) {
-        return javaIdentifierStripped.equals("warped_fungus");
+    @Nullable
+    protected ItemTag getFoodTag() {
+        return ItemTag.STRIDER_FOOD;
     }
 
-    @Nonnull
+    @NonNull
     @Override
-    protected InteractiveTag testMobInteraction(@Nonnull GeyserItemStack itemInHand) {
+    protected InteractiveTag testMobInteraction(@NonNull Hand hand, @NonNull GeyserItemStack itemInHand) {
         if (!canEat(itemInHand) && getFlag(EntityFlag.SADDLED) && passengers.isEmpty() && !session.isSneaking()) {
             // Mount Strider
             return InteractiveTag.RIDE_STRIDER;
         } else {
-            InteractiveTag tag = super.testMobInteraction(itemInHand);
+            InteractiveTag tag = super.testMobInteraction(hand, itemInHand);
             if (tag != InteractiveTag.NONE) {
                 return tag;
             } else {
-                return EntityUtils.attemptToSaddle(session, this, itemInHand).consumesAction()
+                return EntityUtils.attemptToSaddle(this, itemInHand).consumesAction()
                         ? InteractiveTag.SADDLE : InteractiveTag.NONE;
             }
         }
     }
 
-    @Nonnull
+    @NonNull
     @Override
-    protected InteractionResult mobInteract(@Nonnull GeyserItemStack itemInHand) {
+    protected InteractionResult mobInteract(@NonNull Hand hand, @NonNull GeyserItemStack itemInHand) {
         if (!canEat(itemInHand) && getFlag(EntityFlag.SADDLED) && passengers.isEmpty() && !session.isSneaking()) {
             // Mount Strider
             return InteractionResult.SUCCESS;
         } else {
-            InteractionResult superResult = super.mobInteract(itemInHand);
+            InteractionResult superResult = super.mobInteract(hand, itemInHand);
             if (superResult.consumesAction()) {
                 return superResult;
             } else {
-                return EntityUtils.attemptToSaddle(session, this, itemInHand);
+                return EntityUtils.attemptToSaddle(this, itemInHand);
             }
         }
     }

@@ -25,10 +25,10 @@
 
 package org.geysermc.geyser.entity.type;
 
-import com.github.steveice10.mc.protocol.data.game.entity.metadata.type.ByteEntityMetadata;
-import com.github.steveice10.mc.protocol.data.game.entity.type.EntityType;
-import com.nukkitx.math.vector.Vector3f;
-import com.nukkitx.protocol.bedrock.data.entity.EntityFlag;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.metadata.type.ByteEntityMetadata;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.type.EntityType;
+import org.cloudburstmc.math.vector.Vector3f;
+import org.cloudburstmc.protocol.bedrock.data.entity.EntityFlag;
 import org.geysermc.geyser.entity.EntityDefinition;
 import org.geysermc.geyser.session.GeyserSession;
 
@@ -70,8 +70,8 @@ public class AbstractArrowEntity extends Entity {
         super.setMotion(motion);
 
         double horizontalSpeed = Math.sqrt(motion.getX() * motion.getX() + motion.getZ() * motion.getZ());
-        this.yaw = (float) Math.toDegrees(Math.atan2(motion.getX(), motion.getZ()));
-        this.pitch = (float) Math.toDegrees(Math.atan2(motion.getY(), horizontalSpeed));
-        this.headYaw = yaw;
+        setYaw((float) Math.toDegrees(Math.atan2(motion.getX(), motion.getZ())));
+        setPitch((float) Math.toDegrees(Math.atan2(motion.getY(), horizontalSpeed)));
+        setHeadYaw(getYaw());
     }
 }

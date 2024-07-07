@@ -25,69 +25,94 @@
 
 package org.geysermc.geyser.util;
 
-import com.github.steveice10.opennbt.tag.builtin.*;
-import it.unimi.dsi.fastutil.ints.Int2IntMap;
+import net.kyori.adventure.text.Component;
+import org.checkerframework.checker.nullness.qual.Nullable;
+import org.geysermc.geyser.inventory.item.BedrockEnchantment;
+import org.geysermc.geyser.item.Items;
+import org.geysermc.geyser.item.enchantment.Enchantment;
+import org.geysermc.geyser.item.enchantment.EnchantmentComponent;
+import org.geysermc.geyser.item.type.FishingRodItem;
+import org.geysermc.geyser.item.type.Item;
 import org.geysermc.geyser.session.GeyserSession;
+import org.geysermc.mcprotocollib.protocol.data.game.item.ItemStack;
+import org.geysermc.mcprotocollib.protocol.data.game.item.component.DataComponentType;
+import org.geysermc.mcprotocollib.protocol.data.game.item.component.DataComponents;
+import org.geysermc.mcprotocollib.protocol.data.game.item.component.ItemEnchantments;
 
-public class ItemUtils {
-    private static Int2IntMap DYE_COLORS = null;
+import java.util.Map;
 
-    public static int getEnchantmentLevel(CompoundTag itemNBTData, String enchantmentId) {
-        ListTag enchantments = (itemNBTData == null ? null : itemNBTData.get("Enchantments"));
-        if (enchantments != null) {
-            int enchantmentLevel = 0;
-            for (Tag tag : enchantments) {
-                CompoundTag enchantment = (CompoundTag) tag;
-                StringTag enchantId = enchantment.get("id");
-                if (enchantId.getValue().equals(enchantmentId)) {
-                    enchantmentLevel = (int) ((ShortTag) enchantment.get("lvl")).getValue();
-                }
+public final class ItemUtils {
+
+    /**
+     * Cheap hack. Proper solution is to read the enchantment effects.
+     */
+    @Deprecated
+    public static int getEnchantmentLevel(GeyserSession session, @Nullable DataComponents components, BedrockEnchantment bedrockEnchantment) {
+        if (components == null) {
+            return 0;
+        }
+
+        ItemEnchantments enchantmentData = components.get(DataComponentType.ENCHANTMENTS);
+        if (enchantmentData == null) {
+            return 0;
+        }
+
+        for (Map.Entry<Integer, Integer> entry : enchantmentData.getEnchantments().entrySet()) {
+            Enchantment enchantment = session.getRegistryCache().enchantments().byId(entry.getKey());
+            if (enchantment.bedrockEnchantment() == bedrockEnchantment) {
+                return entry.getValue();
             }
-            return enchantmentLevel;
         }
         return 0;
+    }
+
+    public static boolean hasEffect(GeyserSession session, @Nullable ItemStack itemStack, EnchantmentComponent component) {
+        if (itemStack == null) {
+            return false;
+        }
+        DataComponents components = itemStack.getDataComponents();
+        if (components == null) {
+            return false;
+        }
+
+        ItemEnchantments enchantmentData = components.get(DataComponentType.ENCHANTMENTS);
+        if (enchantmentData == null) {
+            return false;
+        }
+
+        for (Integer id : enchantmentData.getEnchantments().keySet()) {
+            Enchantment enchantment = session.getRegistryCache().enchantments().byId(id);
+            if (enchantment.effects().contains(component)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**
      * @return the correct Bedrock durability for this item.
      */
-    public static int getCorrectBedrockDurability(GeyserSession session, int javaId, int original) {
-        if (javaId == session.getItemMappings().getStoredItems().fishingRod().getJavaId()) {
+    public static int getCorrectBedrockDurability(Item item, int original) {
+        if (item == Items.FISHING_ROD) {
             // Java durability: 64
             // Bedrock durability : 384
             // 384 / 64 = 6
-            return original * 6;
+            return FishingRodItem.getBedrockDamage(original);
         }
         return original;
     }
 
     /**
-     * @param itemTag the NBT tag of the item
+     * @param components the data components of the item
      * @return the custom name of the item
      */
-    public static String getCustomName(CompoundTag itemTag) {
-        if (itemTag != null) {
-            if (itemTag.get("display") instanceof CompoundTag displayTag) {
-                if (displayTag.get("Name") instanceof StringTag nameTag) {
-                    return nameTag.getValue();
-                }
-            }
+    public static @Nullable Component getCustomName(DataComponents components) {
+        if (components == null) {
+            return null;
         }
-        return null;
+        return components.get(DataComponentType.CUSTOM_NAME);
     }
 
-    /**
-     * Return the dye color associated with this Java item ID, if any. Returns -1 if no dye color exists for this item.
-     */
-    public static int dyeColorFor(int javaId) {
-        return DYE_COLORS.get(javaId);
-    }
-
-    public static void setDyeColors(Int2IntMap dyeColors) {
-        if (DYE_COLORS != null) {
-            throw new RuntimeException();
-        }
-        dyeColors.defaultReturnValue(-1);
-        DYE_COLORS = dyeColors;
+    private ItemUtils() {
     }
 }

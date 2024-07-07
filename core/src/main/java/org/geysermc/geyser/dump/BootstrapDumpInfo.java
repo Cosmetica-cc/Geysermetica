@@ -27,8 +27,9 @@ package org.geysermc.geyser.dump;
 
 import lombok.AllArgsConstructor;
 import lombok.Getter;
-import org.geysermc.common.PlatformType;
 import org.geysermc.geyser.GeyserImpl;
+import org.geysermc.geyser.api.util.PlatformType;
+import org.geysermc.geyser.text.AsteriskSerializer;
 
 import java.util.List;
 
@@ -53,6 +54,8 @@ public class BootstrapDumpInfo {
     @Getter
     @AllArgsConstructor
     public static class ListenerInfo {
+
+        @AsteriskSerializer.Asterisk(isIp = true)
         public String ip;
         public int port;
     }

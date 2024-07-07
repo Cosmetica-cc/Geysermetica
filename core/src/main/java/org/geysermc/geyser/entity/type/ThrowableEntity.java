@@ -25,15 +25,15 @@
 
 package org.geysermc.geyser.entity.type;
 
-import com.github.steveice10.mc.protocol.data.game.entity.type.EntityType;
-import com.nukkitx.math.vector.Vector3f;
-import com.nukkitx.protocol.bedrock.data.LevelEventType;
-import com.nukkitx.protocol.bedrock.data.entity.EntityFlag;
-import com.nukkitx.protocol.bedrock.packet.LevelEventPacket;
-import com.nukkitx.protocol.bedrock.packet.MoveEntityDeltaPacket;
+import org.cloudburstmc.math.vector.Vector3f;
+import org.cloudburstmc.protocol.bedrock.data.LevelEvent;
+import org.cloudburstmc.protocol.bedrock.data.entity.EntityFlag;
+import org.cloudburstmc.protocol.bedrock.packet.LevelEventPacket;
+import org.cloudburstmc.protocol.bedrock.packet.MoveEntityDeltaPacket;
 import org.geysermc.geyser.entity.EntityDefinition;
-import org.geysermc.geyser.session.GeyserSession;
 import org.geysermc.geyser.level.block.BlockStateValues;
+import org.geysermc.geyser.session.GeyserSession;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.type.EntityType;
 
 import java.util.UUID;
 
@@ -51,12 +51,14 @@ public class ThrowableEntity extends Entity implements Tickable {
 
     /**
      * Updates the position for the Bedrock client.
-     *
      * Java clients assume the next positions of moving items. Bedrock needs to be explicitly told positions
      */
     @Override
     public void tick() {
-        moveAbsoluteImmediate(position.add(motion), yaw, pitch, headYaw, onGround, false);
+        if (removedInVoid()) {
+            return;
+        }
+        moveAbsoluteImmediate(position.add(motion), getYaw(), getPitch(), getHeadYaw(), isOnGround(), false);
         float drag = getDrag();
         float gravity = getGravity();
         motion = motion.mul(drag).down(gravity);
@@ -89,20 +91,20 @@ public class ThrowableEntity extends Entity implements Tickable {
         }
         setPosition(position);
 
-        if (this.yaw != yaw) {
+        if (getYaw() != yaw) {
             moveEntityDeltaPacket.getFlags().add(MoveEntityDeltaPacket.Flag.HAS_YAW);
             moveEntityDeltaPacket.setYaw(yaw);
-            this.yaw = yaw;
+            setYaw(yaw);
         }
-        if (this.pitch != pitch) {
+        if (getPitch() != pitch) {
             moveEntityDeltaPacket.getFlags().add(MoveEntityDeltaPacket.Flag.HAS_PITCH);
             moveEntityDeltaPacket.setPitch(pitch);
-            this.pitch = pitch;
+            setPitch(pitch);
         }
-        if (this.headYaw != headYaw) {
+        if (getHeadYaw() != headYaw) {
             moveEntityDeltaPacket.getFlags().add(MoveEntityDeltaPacket.Flag.HAS_HEAD_YAW);
             moveEntityDeltaPacket.setHeadYaw(headYaw);
-            this.headYaw = headYaw;
+            setHeadYaw(headYaw);
         }
 
         if (!moveEntityDeltaPacket.getFlags().isEmpty()) {
@@ -171,14 +173,14 @@ public class ThrowableEntity extends Entity implements Tickable {
     }
 
     @Override
-    public boolean despawnEntity() {
+    public void despawnEntity() {
         if (definition.entityType() == EntityType.ENDER_PEARL) {
             LevelEventPacket particlePacket = new LevelEventPacket();
-            particlePacket.setType(LevelEventType.PARTICLE_TELEPORT);
+            particlePacket.setType(LevelEvent.PARTICLE_TELEPORT);
             particlePacket.setPosition(position);
             session.sendUpstreamPacket(particlePacket);
         }
-        return super.despawnEntity();
+        super.despawnEntity();
     }
 
     @Override
@@ -191,5 +193,18 @@ public class ThrowableEntity extends Entity implements Tickable {
     public void moveAbsolute(Vector3f position, float yaw, float pitch, float headYaw, boolean isOnGround, boolean teleported) {
         moveAbsoluteImmediate(position, yaw, pitch, headYaw, isOnGround, teleported);
         lastJavaPosition = position;
+    }
+
+    /**
+     * Removes the entity if it is 64 blocks below the world.
+     *
+     * @return true if the entity was removed
+     */
+    public boolean removedInVoid() {
+        if (position.getY() < session.getDimensionType().minY() - 64) {
+            session.getEntityCache().removeEntity(this);
+            return true;
+        }
+        return false;
     }
 }

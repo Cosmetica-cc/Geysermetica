@@ -25,31 +25,60 @@
 
 package org.geysermc.geyser.level;
 
-import com.github.steveice10.mc.protocol.data.game.entity.player.GameMode;
-import com.github.steveice10.mc.protocol.data.game.setting.Difficulty;
-import com.github.steveice10.mc.protocol.packet.ingame.serverbound.ServerboundChatPacket;
-import com.nukkitx.nbt.NbtMap;
-import com.nukkitx.nbt.NbtMapBuilder;
+import it.unimi.dsi.fastutil.ints.Int2ObjectMap;
 import it.unimi.dsi.fastutil.objects.Object2ObjectMap;
 import it.unimi.dsi.fastutil.objects.Object2ObjectOpenHashMap;
+import org.checkerframework.checker.nullness.qual.NonNull;
+import org.checkerframework.checker.nullness.qual.Nullable;
+import org.cloudburstmc.math.vector.Vector3i;
+import org.geysermc.erosion.packet.backendbound.BackendboundBatchBlockRequestPacket;
+import org.geysermc.erosion.packet.backendbound.BackendboundBlockRequestPacket;
+import org.geysermc.erosion.packet.backendbound.BackendboundPickBlockPacket;
+import org.geysermc.erosion.util.BlockPositionIterator;
 import org.geysermc.geyser.session.GeyserSession;
-import org.geysermc.geyser.session.cache.ChunkCache;
-import org.geysermc.geyser.translator.inventory.LecternInventoryTranslator;
-import org.geysermc.geyser.level.block.BlockStateValues;
+import org.geysermc.mcprotocollib.protocol.data.game.entity.player.GameMode;
+import org.geysermc.mcprotocollib.protocol.data.game.item.component.DataComponents;
 
-import java.util.Locale;
+import java.util.concurrent.CompletableFuture;
 
 public class GeyserWorldManager extends WorldManager {
-
-    private static final Object2ObjectMap<String, String> gameruleCache = new Object2ObjectOpenHashMap<>();
+    private final Object2ObjectMap<String, String> gameruleCache = new Object2ObjectOpenHashMap<>();
 
     @Override
     public int getBlockAt(GeyserSession session, int x, int y, int z) {
-        ChunkCache chunkCache = session.getChunkCache();
-        if (chunkCache != null) { // Chunk cache can be null if the session is closed asynchronously
-            return chunkCache.getBlockAt(x, y, z);
+        var erosionHandler = session.getErosionHandler().getAsActive();
+        if (erosionHandler == null) {
+            return session.getChunkCache().getBlockAt(x, y, z);
         }
-        return BlockStateValues.JAVA_AIR_ID;
+        CompletableFuture<Integer> future = new CompletableFuture<>(); // Boxes
+        erosionHandler.setPendingLookup(future);
+        erosionHandler.sendPacket(new BackendboundBlockRequestPacket(0, Vector3i.from(x, y, z)));
+        return future.join();
+    }
+
+    @Override
+    public CompletableFuture<Integer> getBlockAtAsync(GeyserSession session, int x, int y, int z) {
+        var erosionHandler = session.getErosionHandler().getAsActive();
+        if (erosionHandler == null) {
+            return super.getBlockAtAsync(session, x, y, z);
+        }
+        CompletableFuture<Integer> future = new CompletableFuture<>(); // Boxes
+        int transactionId = erosionHandler.getNextTransactionId();
+        erosionHandler.getAsyncPendingLookups().put(transactionId, future);
+        erosionHandler.sendPacket(new BackendboundBlockRequestPacket(transactionId, Vector3i.from(x, y, z)));
+        return future;
+    }
+
+    @Override
+    public int[] getBlocksAt(GeyserSession session, BlockPositionIterator iter) {
+        var erosionHandler = session.getErosionHandler().getAsActive();
+        if (erosionHandler == null) {
+            return super.getBlocksAt(session, iter);
+        }
+        CompletableFuture<int[]> future = new CompletableFuture<>();
+        erosionHandler.setPendingBatchLookup(future);
+        erosionHandler.sendPacket(new BackendboundBatchBlockRequestPacket(iter));
+        return future.join();
     }
 
     @Override
@@ -59,42 +88,19 @@ public class GeyserWorldManager extends WorldManager {
     }
 
     @Override
-    public NbtMap getLecternDataAt(GeyserSession session, int x, int y, int z, boolean isChunkLoad) {
-        // Without direct server access, we can't get lectern information on-the-fly.
-        // I should have set this up so it's only called when there is a book in the block state. - Camotoy
-        NbtMapBuilder lecternTag = LecternInventoryTranslator.getBaseLecternTag(x, y, z, 1);
-        lecternTag.putCompound("book", NbtMap.builder()
-                .putByte("Count", (byte) 1)
-                .putShort("Damage", (short) 0)
-                .putString("Name", "minecraft:written_book")
-                .putCompound("tag", NbtMap.builder()
-                        .putString("photoname", "")
-                        .putString("text", "")
-                        .build())
-                .build());
-        lecternTag.putInt("page", -1); // I'm surprisingly glad this exists - it forces Bedrock to stop reading immediately. Usually.
-        return lecternTag.build();
-    }
-
-    @Override
-    public boolean shouldExpectLecternHandled() {
-        return false;
-    }
-
-    @Override
     public void setGameRule(GeyserSession session, String name, Object value) {
-        session.sendDownstreamPacket(new ServerboundChatPacket("/gamerule " + name + " " + value));
+        super.setGameRule(session, name, value);
         gameruleCache.put(name, String.valueOf(value));
     }
 
     @Override
-    public Boolean getGameRuleBool(GeyserSession session, GameRule gameRule) {
+    public boolean getGameRuleBool(GeyserSession session, GameRule gameRule) {
         String value = gameruleCache.get(gameRule.getJavaID());
         if (value != null) {
             return Boolean.parseBoolean(value);
         }
 
-        return gameRule.getDefaultValue() != null ? (Boolean) gameRule.getDefaultValue() : false;
+        return gameRule.getDefaultBooleanValue();
     }
 
     @Override
@@ -104,21 +110,29 @@ public class GeyserWorldManager extends WorldManager {
             return Integer.parseInt(value);
         }
 
-        return gameRule.getDefaultValue() != null ? (int) gameRule.getDefaultValue() : 0;
+        return gameRule.getDefaultIntValue();
     }
 
     @Override
-    public void setPlayerGameMode(GeyserSession session, GameMode gameMode) {
-        session.sendDownstreamPacket(new ServerboundChatPacket("/gamemode " + gameMode.name().toLowerCase(Locale.ROOT)));
-    }
-
-    @Override
-    public void setDifficulty(GeyserSession session, Difficulty difficulty) {
-        session.sendDownstreamPacket(new ServerboundChatPacket("/difficulty " + difficulty.name().toLowerCase(Locale.ROOT)));
+    public GameMode getDefaultGameMode(GeyserSession session) {
+        return GameMode.SURVIVAL;
     }
 
     @Override
     public boolean hasPermission(GeyserSession session, String permission) {
         return false;
+    }
+
+    @NonNull
+    @Override
+    public CompletableFuture<@Nullable DataComponents> getPickItemComponents(GeyserSession session, int x, int y, int z, boolean addNbtData) {
+        var erosionHandler = session.getErosionHandler().getAsActive();
+        if (erosionHandler == null) {
+            return super.getPickItemComponents(session, x, y, z, addNbtData);
+        }
+        CompletableFuture<Int2ObjectMap<byte[]>> future = new CompletableFuture<>();
+        erosionHandler.setPickBlockLookup(future);
+        erosionHandler.sendPacket(new BackendboundPickBlockPacket(Vector3i.from(x, y, z)));
+        return future.thenApply(RAW_TRANSFORMER);
     }
 }

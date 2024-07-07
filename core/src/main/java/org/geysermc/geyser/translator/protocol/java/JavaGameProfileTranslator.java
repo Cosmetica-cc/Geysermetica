@@ -26,21 +26,27 @@
 package org.geysermc.geyser.translator.protocol.java;
 
 import com.github.steveice10.mc.auth.data.GameProfile;
-import com.github.steveice10.mc.protocol.packet.login.clientbound.ClientboundGameProfilePacket;
-import org.geysermc.geyser.session.auth.AuthType;
+import net.kyori.adventure.key.Key;
+import org.geysermc.geyser.api.network.AuthType;
 import org.geysermc.geyser.entity.type.player.PlayerEntity;
 import org.geysermc.geyser.session.GeyserSession;
+import org.geysermc.geyser.skin.SkinManager;
 import org.geysermc.geyser.translator.protocol.PacketTranslator;
 import org.geysermc.geyser.translator.protocol.Translator;
-import org.geysermc.geyser.skin.SkinManager;
+import org.geysermc.geyser.util.PluginMessageUtils;
+import org.geysermc.mcprotocollib.protocol.packet.common.serverbound.ServerboundCustomPayloadPacket;
+import org.geysermc.mcprotocollib.protocol.packet.login.clientbound.ClientboundGameProfilePacket;
 
+/**
+ * ClientboundGameProfilePacket triggers protocol change LOGIN -> CONFIGURATION
+ */
 @Translator(packet = ClientboundGameProfilePacket.class)
 public class JavaGameProfileTranslator extends PacketTranslator<ClientboundGameProfilePacket> {
 
     @Override
     public void translate(GeyserSession session, ClientboundGameProfilePacket packet) {
         PlayerEntity playerEntity = session.getPlayerEntity();
-        AuthType remoteAuthType = session.getRemoteAuthType();
+        AuthType remoteAuthType = session.remoteServer().authType();
 
         // Required, or else Floodgate players break with Spigot chunk caching
         GameProfile profile = packet.getProfile();
@@ -57,7 +63,17 @@ public class JavaGameProfileTranslator extends PacketTranslator<ClientboundGameP
         if (remoteAuthType == AuthType.FLOODGATE) {
             // We'll send the skin upload a bit after the handshake packet (aka this packet),
             // because otherwise the global server returns the data too fast.
-            session.getAuthData().upload(session.getGeyser());
+            // We upload it after we know for sure that the target server
+            // is ready to handle the result of the global server.
+            session.getGeyser().getSkinUploader().uploadSkin(session.getCertChainData(), session.getClientData().getOriginalString());
         }
+
+        // We no longer need these variables; they're just taking up space in memory now
+        session.setCertChainData(null);
+        session.getClientData().setOriginalString(null);
+
+        // configuration phase stuff that the vanilla client replies with after receiving the GameProfilePacket
+        session.sendDownstreamPacket(new ServerboundCustomPayloadPacket(Key.key("brand"), PluginMessageUtils.getGeyserBrandData()));
+        session.sendJavaClientSettings();
     }
 }

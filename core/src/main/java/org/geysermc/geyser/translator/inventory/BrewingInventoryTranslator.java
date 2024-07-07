@@ -25,25 +25,30 @@
 
 package org.geysermc.geyser.translator.inventory;
 
-import com.nukkitx.protocol.bedrock.data.inventory.ContainerSlotType;
-import com.nukkitx.protocol.bedrock.data.inventory.ContainerType;
-import com.nukkitx.protocol.bedrock.data.inventory.StackRequestSlotInfoData;
-import com.nukkitx.protocol.bedrock.packet.ContainerSetDataPacket;
-import org.geysermc.geyser.inventory.Inventory;
-import org.geysermc.geyser.session.GeyserSession;
+import org.cloudburstmc.protocol.bedrock.data.inventory.ContainerSlotType;
+import org.cloudburstmc.protocol.bedrock.data.inventory.ContainerType;
+import org.cloudburstmc.protocol.bedrock.data.inventory.itemstack.request.ItemStackRequestSlotData;
+import org.cloudburstmc.protocol.bedrock.packet.ContainerSetDataPacket;
 import org.geysermc.geyser.inventory.BedrockContainerSlot;
+import org.geysermc.geyser.inventory.Inventory;
 import org.geysermc.geyser.inventory.updater.ContainerInventoryUpdater;
+import org.geysermc.geyser.level.block.Blocks;
+import org.geysermc.geyser.level.block.property.Properties;
+import org.geysermc.geyser.session.GeyserSession;
 
 public class BrewingInventoryTranslator extends AbstractBlockInventoryTranslator {
     public BrewingInventoryTranslator() {
-        super(5, "minecraft:brewing_stand[has_bottle_0=false,has_bottle_1=false,has_bottle_2=false]", ContainerType.BREWING_STAND, ContainerInventoryUpdater.INSTANCE);
+        super(5, Blocks.BREWING_STAND.defaultBlockState()
+                .withValue(Properties.HAS_BOTTLE_0, false)
+                .withValue(Properties.HAS_BOTTLE_1, false)
+                .withValue(Properties.HAS_BOTTLE_2, false), ContainerType.BREWING_STAND, ContainerInventoryUpdater.INSTANCE);
     }
 
     @Override
     public void openInventory(GeyserSession session, Inventory inventory) {
         super.openInventory(session, inventory);
         ContainerSetDataPacket dataPacket = new ContainerSetDataPacket();
-        dataPacket.setWindowId((byte) inventory.getId());
+        dataPacket.setWindowId((byte) inventory.getBedrockId());
         dataPacket.setProperty(ContainerSetDataPacket.BREWING_STAND_FUEL_TOTAL);
         dataPacket.setValue(20);
         session.sendUpstreamPacket(dataPacket);
@@ -52,7 +57,7 @@ public class BrewingInventoryTranslator extends AbstractBlockInventoryTranslator
     @Override
     public void updateProperty(GeyserSession session, Inventory inventory, int key, int value) {
         ContainerSetDataPacket dataPacket = new ContainerSetDataPacket();
-        dataPacket.setWindowId((byte) inventory.getId());
+        dataPacket.setWindowId((byte) inventory.getBedrockId());
         switch (key) {
             case 0:
                 dataPacket.setProperty(ContainerSetDataPacket.BREWING_STAND_BREW_TIME);
@@ -68,7 +73,7 @@ public class BrewingInventoryTranslator extends AbstractBlockInventoryTranslator
     }
 
     @Override
-    public int bedrockSlotToJava(StackRequestSlotInfoData slotInfoData) {
+    public int bedrockSlotToJava(ItemStackRequestSlotData slotInfoData) {
         if (slotInfoData.getContainer() == ContainerSlotType.BREWING_INPUT) {
             // Ingredient
             return 3;
